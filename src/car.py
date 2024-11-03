@@ -134,6 +134,7 @@ class Car:
         if surface is None:
             surface = self.screen
 
+        #Add a new costume/look until there are enough
         while len(self.carBody) <= appearance:
             self.carBody.append(self.carBody[-1].copy())
             self.carWheelR.append(self.carWheelR[-1].copy())
@@ -144,6 +145,7 @@ class Car:
             if self.offCourse:
                 bodyColour = (255, 0, 0)
 
+            #Change colour if the current bodyColour is not what it should be
             if self.bodyColour[appearance] != bodyColour:
                 self.carBody[appearance].fill((255, 255, 255), special_flags = 5)  #BLEND_RGB_MAX
                 self.carWheelR[appearance].fill((255, 255, 255), special_flags = 5)  #BLEND_RGB_MAX
@@ -155,6 +157,7 @@ class Car:
 
                 self.bodyColour[appearance] = bodyColour
 
+            #Rotate wheel to match input
             self.transformedCarWheelR = self.pygame.transform.rotate(self.carWheelR[appearance], (self.steeringInput * self.maxTurningAngle * 0.5))
             self.transformedCarWheelL = self.pygame.transform.rotate(self.carWheelL[appearance], (self.steeringInput * self.maxTurningAngle * 0.5))
             self.transformedCarBody = self.carBody[appearance]
@@ -179,6 +182,7 @@ class Car:
     def update(self, steeringInput, accelerationInput, deltaTime, pause = False):
         self.modelMultiplier = self.zoom * (1 / 500) * self.width #0.02 at zoom = 1
 
+        #Load in car body if it hasn't already been loaded
         if len(self.carBody) == 0:
             self.transformedCarBody = self.pygame.image.load(self.directories["f1Car"]).convert_alpha()
             self.transformedCarWheelR = self.pygame.image.load(self.directories["f1Wheel"]).convert_alpha()
@@ -200,7 +204,7 @@ class Car:
             self.accelerationInput = accelerationInput
 
             if self.accelerationInput > 0:
-                if self.acceleration < 0:
+                if self.acceleration < 0: #Stop car from reversing when breaking
                     self.acceleration = 0
 
                 if self.velocity.x == 0:
@@ -227,12 +231,14 @@ class Car:
 
             self.steering = self.steeringInput * self.maxTurningAngle * (10/60)
 
+            #Slow down car to the grass max speed if its on grass
             self.velocity += (self.acceleration * deltaTime, 0)
             self.velocity.x = max(min(self.velocity.x, self.maxSpeed), 0)
             if self.offTrack and (not self.justCameOff or (self.velocity.x <= self.grassMaxSpeed)):
                 self.justCameOff = False
                 self.velocity.x = min(self.velocity.x, self.grassMaxSpeed)
 
+            #Calculate steering radius from length of car, current speed and steering input
             if self.steering:
                 turningRadius = (self.wheelBase / math.sin(math.radians(self.steering))) + math.copysign((self.velocity.x / 10) ** 1.5, self.steering)
                 angularVelocity = self.velocity.x / turningRadius
@@ -244,6 +250,7 @@ class Car:
             if (self.timerStart is None) and (self.position != self.startPos):
                 self.timerStart = time.time()
 
+            #Invalidate time if car goes through the finish line the wrong way
             if self.track.closed:
                 startPos, startAngle, startIndex, startDir = self.track.getStartPos()
                 if startDir:

@@ -1,5 +1,6 @@
 from utils import *
 from history import *
+from scipy.spatial import KDTree
 
 import base64
 import uuid
@@ -79,6 +80,7 @@ class ControlPoint:
             if self.posAtClick is not None:
                 self.posAtRelease = self.getPos()
 
+        #Ensures control point can't go off the screen
         if self.pointSelected:
             if (screenBorder - offset[0]) / zoom < mousePosX < (screenWidth - screenBorder - offset[0]) / zoom:
                 self.posX = mousePosX
@@ -110,6 +112,8 @@ class Track:
 
         self.points = points
         self.splinePoints = []
+        self.pointCoords = None
+        self.pointTree = None
 
         for point in self.points:
             self.points.append(ControlPoint(point[0], point[1]))
@@ -276,13 +280,14 @@ class Track:
             point.move(newPosition)
         self.computeTrack()
 
+    #Called when track is closed/unclosed
     def updateCloseStatus(self, value, update = False):
         if self.closed is not value:
             self.closed = value
             if update:
                 self.computeTrack(updatePoints = [0])
 
-    #Called in game loop
+    #Called in game loop, offsets points when user pans/zooms
     def updateOffsetValues(self, offset, zoom):
         offsetChanged = False
         if (offset != self.offsetValue) or (zoom != self.zoomValue):
@@ -303,7 +308,7 @@ class Track:
             updateRanges = []
             for point in updatePoints:
                 if len(updatePoints) > 0:
-                    if self.closed:
+                    if self.closed: #Used to determine what points should be updated
                         lengthPoints = (len(self.points) - 1)
 
                         beforeJoinLowerBound = max(point - 2, 0)
@@ -329,7 +334,7 @@ class Track:
 
                         updateRanges.append(updateRange)
 
-            if len(updatePoints) == 0:
+            if len(updatePoints) == 0: #Reset all points
                 self.__offset_mainPolyLeftEdge = offsetPoints(self.__mainPolyLeftEdge, self.offsetValue, self.zoomValue)
                 self.__offset_mainPolyRightEdge = offsetPoints(self.__mainPolyRightEdge, self.offsetValue, self.zoomValue)
 
@@ -345,7 +350,7 @@ class Track:
                 self.__offset_splinePoints = offsetPoints(self.splinePoints, self.offsetValue, self.zoomValue)
 
             else:
-                for updateRange in updateRanges:
+                for updateRange in updateRanges: #Reset points in specific range
                     self.__offset_mainPolyLeftEdge[updateRange[0]:updateRange[1]] = offsetPoints(self.__mainPolyLeftEdge[updateRange[0]:updateRange[1]], self.offsetValue, self.zoomValue)
                     self.__offset_mainPolyRightEdge[updateRange[0]:updateRange[1]] = offsetPoints(self.__mainPolyRightEdge[updateRange[0]:updateRange[1]], self.offsetValue, self.zoomValue)
 
@@ -513,29 +518,29 @@ class Track:
     def undo(self, actions):
         for action in actions:
             if action is not None:
-                if action.command == "ADD POINT":
+                if action.command == "ADD POINT": #Handles the undoing of adding points
                     self.remove(action.params[0], update = False)
                     self.shouldTrackBeClosed()
                     self.calculateLength()
                     self.computeTrack(updatePoints = [action.params[0]])
-                elif action.command == "REMOVE POINT":
+                elif action.command == "REMOVE POINT": #Handles the undoing of removing points
                     self.add(action.params[1], action.params[0])
                     self.calculateLength()
-                elif action.command == "MOVE POINT":
+                elif action.command == "MOVE POINT": #Handles the undoing of moving points
                     self.points[action.params[0]].move(action.params[1])
                     self.shouldTrackBeClosed()
                     self.calculateLength()
                     self.computeTrack(updatePoints = [action.params[0]])
-                elif action.command == "CHANGE WIDTH":
+                elif action.command == "CHANGE WIDTH": #Handles the undoing of changing the width of the track
                     self.changeWidth(action.params[0])
                     action.params[2].updateValue(self.width)
-                elif action.command == "CHANGE RESOLUTION":
+                elif action.command == "CHANGE RESOLUTION": #Handles the undoing of changing the resolution
                     self.changeRes(action.params[0])
                     action.params[2].updateValue(self.perSegRes)
-                elif action.command == "SET SCALE":
+                elif action.command == "SET SCALE": #Handles the undoing of setting the scale of the track
                     self.scalePoints(1 / (action.params[0] * (1 / self.scale)))
                     self.calculateLength()
-                elif action.command == "SET FINISH":
+                elif action.command == "SET FINISH": #Handles the undoing of setting the finish line
                     self.finishIndex = action.params[0][0]
                     self.finishDir = action.params[0][1]
         return actions
@@ -544,44 +549,51 @@ class Track:
     def redo(self, actions):
         for action in actions:
             if action is not None:
-                if action.command == "ADD POINT":
+                if action.command == "ADD POINT": #Handles the redoing of adding points
                     self.add(action.params[1], action.params[0], update = False)
                     self.shouldTrackBeClosed()
                     self.computeTrack(updatePoints = [action.params[0]])
                     self.calculateLength()
-                elif action.command == "REMOVE POINT":
+                elif action.command == "REMOVE POINT": #Handles the redoing of removing points
                     self.remove(action.params[0])
                     self.calculateLength()
-                elif action.command == "MOVE POINT":
+                elif action.command == "MOVE POINT": #Handles the redoing of moving points
                     self.points[action.params[0]].move(action.params[2])
                     self.shouldTrackBeClosed()
                     self.calculateLength()
                     self.computeTrack(updatePoints = [action.params[0]])
-                elif action.command == "CHANGE WIDTH":
+                elif action.command == "CHANGE WIDTH": #Handles the redoing of changing the width of the track
                     self.changeWidth(action.params[1])
                     action.params[2].updateValue(self.width)
-                elif action.command == "CHANGE RESOLUTION":
+                elif action.command == "CHANGE RESOLUTION": #Handles the redoing of changing the resolution
                     self.changeRes(action.params[1])
                     action.params[2].updateValue(self.perSegRes)
-                elif action.command == "SET SCALE":
+                elif action.command == "SET SCALE": #Handles the redoing of setting the scale
                     self.scalePoints(action.params[0] * (1 / self.scale))
                     self.calculateLength()
-                elif action.command == "SET FINISH":
+                elif action.command == "SET FINISH": #Handles the redoing of setting the finish line
                     self.finishIndex = action.params[1][0]
                     self.finishDir = action.params[1][1]
         return actions
 
-    def returnPointCoords(self):
-        pointCoords = []
-        for point in self.points:
-            pointCoords.append(point.getPos())
+    #Returns a list of the control point coords
+    def returnPointCoords(self, lazy = False):
+        if (self.pointCoords is None) or not lazy:
+            self.pointCoords = []
+            for point in self.points:
+                self.pointCoords.append(point.getPos())
 
-        return pointCoords
+            if len(self.pointCoords) >= 2:
+                self.pointTree = KDTree(self.pointCoords)
+
+            return list(self.pointCoords)
+        else:
+            return list(self.pointCoords)
 
     #Updates segments that make up main track curve. If no points are specified, whole track curve is updated
     def computeSpline(self, updatePoints = []):
         if len(self.points) >= 2:
-            if self.closed:
+            if self.closed: #Adding points makes the close join seamless and smooth
                 first1 = self.points[1]
                 first2 = self.points[2]
                 last1 = self.points[-2]
@@ -601,7 +613,7 @@ class Track:
 
             for point in updatePoints:
                 if len(updatePoints) > 0:
-                    if self.closed:
+                    if self.closed: #Calculates the update range of the track to ensure only the minimum number of points are recalculated
                         lengthPoints = (len(self.points) - 1) - 4
                         point += 2
 
@@ -638,7 +650,7 @@ class Track:
                     t = tInt / resolution
                     self.splinePoints[tInt] = (calculateSpline(pointCoords, t))
 
-            if self.closed:
+            if self.closed: #Removes the points added at the top
                 self.remove(0, False)
                 self.remove(0, False)
                 self.remove(-1, False)
@@ -653,7 +665,7 @@ class Track:
             updateRanges = []
             for point in updatePoints:
                 if len(updatePoints) > 0:
-                    if self.closed:
+                    if self.closed: #Calculates the update range of the track to ensure only the minimum number of points are recalculated
                         lengthPoints = (len(self.points) - 1)
 
                         beforeJoinLowerBound = max(point - 2, 0)
@@ -679,7 +691,7 @@ class Track:
 
                         updateRanges.append(updateRange)
 
-            if len(updatePoints) == 0:
+            if len(updatePoints) == 0: #Resets all points for recalculation
                 updateRanges = [(0, resolution)]
 
                 self.__mainPolyLeftEdge = self.__offset_mainPolyLeftEdge = ([''] * resolution)
@@ -691,7 +703,7 @@ class Track:
                 self.__rightBorderInnerEdge = self.__offset_rightBorderInnerEdge = ([''] * resolution)
                 self.__rightBorderOuterEdge = self.__offset_rightBorderOuterEdge = ([''] * resolution)
 
-            for updateRange in updateRanges:
+            for updateRange in updateRanges: #Calculates the track edges from the update range above
                 for point in range(*updateRange):
                     self.__mainPolyLeftEdge[point] = calculateSide(self.splinePoints, point, 5)
                     self.__mainPolyRightEdge[point] = calculateSide(self.splinePoints, point, -5)
@@ -792,6 +804,7 @@ class Track:
 
         self.offsetAllTrackPoints(updatePoints = updatePoints)
 
+    #Takes the corner angle, and applies a precalculated formula to work out the maximum speed a car can take
     def calculateMaxCorneringSpeed(self, cornerAngle):
         grad = 0.24 + (0.005 * (self.width - 12))
         yInt = 165.3 - (grad * 680)
@@ -799,6 +812,7 @@ class Track:
         maxCorneringSpeed = ((cornerAngle - yInt) / grad)
         return maxCorneringSpeed
 
+    #Returns the index of a point n distance away
     def getIndexFromDistance(self, currentIndex, distance, reverse = False, closed = True):
         totalDistance = 0
         index = currentIndex
@@ -830,22 +844,7 @@ class Track:
 
         return [closedStatusBefore, self.closed]
 
-    def cloneTrack(self, resolution = None):
-        otherTrack = Track(20, self.pygame, self.screen)
-        otherTrack.points = self.points
-        otherTrack.closed = self.closed
-        otherTrack.finishIndex = self.finishIndex
-        otherTrack.finishDir = self.finishDir
-        otherTrack.width = self.width
-
-        if resolution is None:
-            otherTrack.perSegRes = self.perSegRes
-        else:
-            otherTrack.perSegRes = resolution
-
-        otherTrack.computeTrack()
-        return otherTrack
-
+    #Uses a precalculated formula to ensure that when "auto-res" is turned on, the resolution is adjusted so that the track always looks smooth
     def automaticallyAdjustRes(self):
         if len(self.points) >= 3:
             angles = []
@@ -856,6 +855,7 @@ class Track:
             newRes = 10.289 * (math.e ** (0.1238 * smallestAngle))
             self.changeRes(min(max(newRes, 10), 100))
 
+    #Returns a surface, with the rendered track on it.
     def renderToSurface(self, programColours, zoom):
         xPoints = [point[0] for point in self.splinePoints]
         yPoints = [point[1] for point in self.splinePoints]
@@ -890,22 +890,36 @@ class Track:
         for point in self.points:
             if point.mouseHovering: self.mouseHovering = self.points.index(point)
 
-        #Handles when control point movements begins and ends
+        #Updates control points
         groupMove = False
         for pointIndex in range(len(self.points)):
             point = self.points[pointIndex]
             if screenRect.collidepoint(offsetPoints(point.getPos(), offset, zoom, True)):
                 point.update(mousePosX, mousePosY, zoom, screenWidth, screenHeight, screenBorder, self.pygame, offset)
+
                 if (point.posAtClick is not None) and (point.posAtRelease is not None):
                     newPoint = False
                     if len(self.history.undoStack) > 0:
                         newPoint = (self.history.undoStack.peak().command == "ADD POINT") and (self.history.undoStack.peak().params[0] == pointIndex)
                     if (point.posAtClick != point.posAtRelease) and not newPoint:
                         self.history.addAction("MOVE POINT", [pointIndex, point.posAtClick, point.posAtRelease], group = groupMove)
+                        self.pointCoords = None
                     self.calculateLength()
                     groupMove = True
                     point.posAtClick = None
                     point.posAtRelease = None
+
+                #Prevents points that are next to each-other from touching
+                if point.pointSelected and len(self.points) >= 2:
+                    allButOnePoint = self.returnPointCoords(lazy = True)
+                    allButOnePoint.pop(pointIndex)
+                    nearestPoint, nearestIndex = findNearest(allButOnePoint, point.getPos())
+                    if abs(nearestIndex - pointIndex) == 1:
+                        distance = pointDistance(nearestPoint, point.getPos())
+                        minimumDistance = (self.width * (1 / self.scale))
+                        if (distance <= minimumDistance) and distance != 0:
+                            point.posX = (nearestPoint[0] + (minimumDistance * (point.posX - nearestPoint[0]) / distance))
+                            point.posY = (nearestPoint[1] + (minimumDistance * (point.posY - nearestPoint[1]) / distance))
 
         #Handles when the end control point and start control point should connect
         if len(self.points) >= 5:
@@ -940,7 +954,7 @@ class Track:
             surface = self.screen
 
         if len(self.points) >= 2:
-            if viewMode in ["Track", "Skeleton", "Display"]:
+            if viewMode in ["Track", "Skeleton", "Display"]: #Draws outer track edge
                 for point in range(len(self.points) - 1):
                     leftTrackEdgePolygon = formPolygon(self.__offset_leftBorderInnerEdge, self.__offset_leftBorderOuterEdge, slice((point * self.perSegRes), ((point + 1) * self.perSegRes) + 1), ((point == len(self.points) - 2) and self.closed))
                     rightTrackEdgePolygon = formPolygon(self.__offset_rightBorderInnerEdge, self.__offset_rightBorderOuterEdge, slice((point * self.perSegRes), ((point + 1) * self.perSegRes) + 1), ((point == len(self.points) - 2) and self.closed))
@@ -953,7 +967,7 @@ class Track:
                         self.pygame.gfxdraw.aapolygon(surface, rightTrackEdgePolygon, programColours["white"])
                     self.pygame.gfxdraw.filled_polygon(surface, rightTrackEdgePolygon, programColours["white"])
 
-            if viewMode in ["Track", "Display"]:
+            if viewMode in ["Track", "Display"]: #Draws filled-in part of track
                 for point in range(len(self.points) - 1):
                     mainTrackPolygon = formPolygon(self.__offset_leftBorderInnerEdge, self.__offset_rightBorderInnerEdge, slice((point * self.perSegRes), ((point + 1) * self.perSegRes) + 1), ((point == len(self.points) - 2) and self.closed))
 
@@ -961,7 +975,7 @@ class Track:
                         self.pygame.gfxdraw.aapolygon(surface, mainTrackPolygon, programColours["track"])
                     self.pygame.gfxdraw.filled_polygon(surface, mainTrackPolygon, programColours["track"])
 
-            if viewMode in ["Track", "Skeleton", "Curve"]:
+            if viewMode in ["Track", "Skeleton", "Curve"]: #Draws the main track curve
                 for point in range(len(self.points) - 1):
                     mainCurvePolygon = formPolygon(self.__offset_mainPolyLeftEdge, self.__offset_mainPolyRightEdge, slice((point * self.perSegRes), ((point + 1) * self.perSegRes) + 1), ((point == len(self.points) - 2) and self.closed))
 
@@ -969,7 +983,7 @@ class Track:
                         self.pygame.gfxdraw.aapolygon(surface, mainCurvePolygon, programColours["curve"])
                     self.pygame.gfxdraw.filled_polygon(surface, mainCurvePolygon, programColours["curve"])
 
-            if viewMode in ["Display"]:
+            if viewMode in ["Display"]: #Draws the checkered finish line
                 checkeredHeight = (1 * self.zoomValue * (1 / self.scale))
                 checkeredWidthCount = round((self.width * (1 / self.scale) * self.zoomValue) / checkeredHeight)
                 checkeredWidth = (self.width * (1 / self.scale) * self.zoomValue) / checkeredWidthCount
@@ -1008,13 +1022,13 @@ class Track:
                         checkeredSquarePoints = [corner1, corner2, corner3, corner4]
                         self.pygame.draw.polygon(surface, checkeredColour, checkeredSquarePoints)
 
-            if viewMode in ["Spline Dots"]:
+            if viewMode in ["Spline Dots"]: #Draws spline dots
                 for dot in self.__offset_splinePoints:
                     if antialiasing:
                         self.pygame.gfxdraw.aacircle(surface, int(dot[0]), int(dot[1]), 4, programColours["curve"])
                     self.pygame.gfxdraw.filled_circle(surface, int(dot[0]), int(dot[1]), 4, programColours["curve"])
 
-        if viewMode in ["Track", "Skeleton", "Curve", "Spline Dots"]:
+        if viewMode in ["Track", "Skeleton", "Curve", "Spline Dots"]: #Draws the control points
             for pointIndex in range(len(self.points)):
                 point = self.points[pointIndex]
 
@@ -1029,6 +1043,7 @@ class Track:
             self.computeRacingLine()
             self.lastRacingLine = self.showRacingLine
 
+        #Draw racing line
         if len(self.points) >= 3 and self.showRacingLine:
             racingLinePolygon = formPolygon(self.offset_leftRacingLineSpline, self.offset_rightRacingLineSpline, close = self.closed)
             if antialiasing:

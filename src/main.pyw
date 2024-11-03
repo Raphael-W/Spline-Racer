@@ -1,3 +1,9 @@
+from pygameUIElements import *
+from track import *
+from car import *
+from updateChecker import *
+from utils import *
+
 import json
 import math
 import sqlite3
@@ -12,25 +18,19 @@ import pygame.freetype
 from tkinter.filedialog import askopenfilename
 import tkinter as tk
 
-import sys
+import os
 import webbrowser
 
 import PIL.Image
 from io import BytesIO
 
-from pygameUIElements import *
-from track import *
-from car import *
-from updateChecker import *
-
 if os.name == "nt":
     import ctypes
 
-    appID = 'Raphael Wreford, Racing-Line-Finder' # Arbitrary string
+    appID = 'Raphael-W, Spline-Racer' # Arbitrary string
     ctypes.windll.shell32.SetCurrentProcessExplicitAppUserModelID(appID) #Makes taskbar icon same as window icon (Sets app as "individual app", not linked to python)
 
 pygame.init()
-pygame.display.set_caption("Racing Line Finder")
 screen = pygame.display.set_mode((1280, 720), pygame.RESIZABLE, pygame.SCALED, vsync=1)
 clock = pygame.time.Clock()
 
@@ -38,7 +38,7 @@ pygame.event.set_allowed([pygame.QUIT, pygame.KEYDOWN, pygame.MOUSEBUTTONDOWN])
 
 running = True
 
-githubRepoAddress = "https://github.com/Raphael-W/Racing-Line"
+githubRepoAddress = "https://github.com/Raphael-W/Spline-Racer"
 
 executionDir = os.path.dirname(os.path.dirname(__file__))
 directories = {"mainFont": "assets/fonts/MonoFont.ttf",
@@ -59,7 +59,6 @@ directories = {"mainFont": "assets/fonts/MonoFont.ttf",
                "hide": "assets/icons/hide.png",
                "show": "assets/icons/show.png",
                "pause": "assets/icons/pause.png",
-               "play": "assets/icons/play.png",
                "rename": "assets/icons/rename.png",
                "f1Car": "assets/sprites/f1_car.png",
                "f1Wheel": "assets/sprites/f1_wheel.png",
@@ -80,7 +79,7 @@ fpsLabel = Label(programUI, 15, (118, 30), "NE", "", (200, 200, 200))
 def deleteTrackTimes(UUID):
     conn = sqlite3.connect(directories["raceTimes"])
     cursor = conn.cursor()
-    cursor.execute(f'''DELETE FROM TIMES WHERE UUID = "{UUID}"''')
+    cursor.execute(f'''DELETE FROM TIMES WHERE TrackUUID = "{UUID}"''')
     conn.commit()
     conn.close()
 
@@ -94,6 +93,7 @@ class Scene:
     def handleEvents(self, events):
         global running
 
+        #Default scene is able to handle quitting
         for event in events:
             if event.type == pygame.QUIT:
                 running = False
@@ -103,6 +103,7 @@ class SceneManager:
         self.scenes = []
         self.currentScene = 0
 
+        #Drop-down for selecting different scenes
         self.changeSceneDropdown = Dropdown(programUI, (30, 30), "", (200, 25), self.getSceneNames(), self.currentScene, colour = (80, 80, 80), action = self.setScene)
 
     def addScene(self, scene, name):
@@ -112,9 +113,9 @@ class SceneManager:
 
     def setScene(self, newScene):
         if self.currentScene == 1 and not self.scenes[1].pause:
-            self.scenes[1].togglePause()
+            self.scenes[1].setPause()
         elif self.currentScene == 0 and self.scenes[1].pause and not self.scenes[1].userPaused:
-            self.scenes[1].togglePause()
+            self.scenes[1].setPause()
 
         if isinstance(newScene, str):
             self.currentScene = self.getSceneIndex(newScene)
@@ -129,14 +130,16 @@ class SceneManager:
     def getSceneIndex(self, name):
         return self.getSceneNames().index(name)
 
+    #Updates just the visible scene, each scene "pauses" when not visible
     def updateCurrentScene(self):
+        if len(self.scenes) > 0:
+            self.scenes[self.currentScene].update()
+
+    def programUpdate(self):
         if len(self.scenes[self.getSceneIndex("Track Editor")].track.points) <= 1:
             self.changeSceneDropdown.disabledIndexes = [self.getSceneIndex("Racing")]
         else:
             self.changeSceneDropdown.disabledIndexes = []
-
-        if len(self.scenes) > 0:
-            self.scenes[self.currentScene].update()
 
     #Events are passed from main loop to current scene
     def distributeEvents(self, events):
@@ -167,6 +170,7 @@ class TrackEditor (Scene):
         self.screenBorder = 5
 
         self.offsetPosition = (0, 0)
+        self.pivotPos = None
         self.pivotPos = None
 
         self.zoom = 1
@@ -211,8 +215,7 @@ class TrackEditor (Scene):
                         "curve": (128, 128, 128),
                         "controlPoint": (24, 150, 204),
                         "frontControlPoint": (204, 138, 24),
-                        "mainGrid": (30, 30, 30),
-                        "innerGrid": (25, 25, 25),
+                        "grid": (27, 27, 27),
                         "white": (200, 200, 200),
                         "track": (100, 100, 100)}
 
@@ -231,14 +234,15 @@ class TrackEditor (Scene):
         # ------------ CONFIG ACCORDION ------------
 
         self.saveButton = Button(self.UILayer, (330, 522.5), "SE", (123.75, 30), "Save", 12, (100, 100, 100), action = self.saveTrack)
-        self.saveAsButton = Button(self.UILayer, (198.75, 522.5), "SE", (123.75, 30), "Save As", 12, (100, 100, 100), action = lambda: self.saveTrack(saveNewDirectory = True))
+        self.saveAsButton = Button(self.UILayer, (198.75, 522.5), "SE", (123.75, 30), "Save As", 12, (100, 100, 100), action = lambda: self.saveTrack(
+            save_as = True))
         self.openTrackButton = Button(self.UILayer, (330, 485), "SE", (123.75, 30), "Open", 12, (100, 100, 100), action = self.openTrack)
         self.newTrackButton = Button(self.UILayer, (198.75, 485), "SE", (123.75, 30), "New", 12, (100, 100, 100), action = self.newTrack)
 
         self.setFinishButton = Button(self.UILayer, (330, 440), "SE", (80, 60), "Set Finish", 10, (100, 100, 100), (0, -18), action = self.setFinish)
         self.setFinishImage = Image(self.UILayer, (self.setFinishButton.posX - 28, self.setFinishButton.posY - 10), "SE", directories["finishLine"], 1, colour = (30, 30, 30))
 
-        self.setScaleButton = Button(self.UILayer, (242.5, 440), "SE", (80, 60), "Set Scale", 10, (100, 100, 100), (0, -18), action = self.setScale)
+        self.setScaleButton = Button(self.UILayer, (242.5, 440), "SE", (80, 60), "Scale Track", 10, (100, 100, 100), (0, -18), action = self.setScale)
         self.scaleImage = Image(self.UILayer, (self.setScaleButton.posX - 28, self.setScaleButton.posY - 10), "SE", directories["scale"], 1, colour = (30, 30, 30))
 
         self.recentreButton = Button(self.UILayer, (155, 440), "SE", (80, 60), "Recentre", 10, (100, 100, 100), (0, -18), action = self.recentreFrame)
@@ -247,10 +251,10 @@ class TrackEditor (Scene):
         self.setReferenceImageButton = Button(self.UILayer, (330, 365), "SE", (185, 30), "Set Reference Image", 12, (100, 100, 100), textOffset = (0, -1), action = self.setReferenceImage)
 
         self.removeReferenceImageButton = Button(self.UILayer, (105, 365), "SE", (30, 30), "", 12, (66, 41, 41), action = self.clearReferenceImage)
-        self.removeReferenceImageIcon = Image(self.UILayer, (self.removeReferenceImageButton.posX - 1, self.removeReferenceImageButton.posY - 1), "SE", directories["bin"], 0.7, colour = (200, 200, 200))
+        self.removeReferenceImageIcon = Image(self.UILayer, (self.removeReferenceImageButton.posX - 1, self.removeReferenceImageButton.posY - 1), "SE", directories["bin"], 0.7, colour = self.colours["white"])
 
         self.hideReferenceImageButton = Button(self.UILayer, (140, 365), "SE", (30, 30), "", 12, (100, 100, 100), action = self.toggleReferenceImageVisibility)
-        self.hideReferenceImageIcon = Image(self.UILayer, (self.hideReferenceImageButton.posX - 1, self.hideReferenceImageButton.posY - 1), "SE", directories["hide"], 0.7, colour = (200, 200, 200))
+        self.hideReferenceImageIcon = Image(self.UILayer, (self.hideReferenceImageButton.posX - 1, self.hideReferenceImageButton.posY - 1), "SE", directories["hide"], 0.7, colour = self.colours["white"])
 
         self.trackResSlider = Slider(self.UILayer, 15, self.colours["white"], self.colours["controlPoint"], (225, 308), "SE", 1, 100, (10, 100), value = self.track.perSegRes, action = self.track.changeRes, finishedUpdatingAction = self.track.changeResComplete, increment = 1)
         self.trackResLabel = Label(self.UILayer, 15, (330, 313), "SE", "Track Res", self.colours["white"])
@@ -277,7 +281,7 @@ class TrackEditor (Scene):
         self.redoIcon = Image(self.UILayer, (self.redoButton.posX - 2, self.redoButton.posY - 2), "SE", directories["redo"], 0.8, colour = self.colours["white"])
 
         self.viewModeDropdown = Dropdown(self.UILayer, (225, 240), "SE", (150, 25),["Track", "Skeleton", "Curve", "Spline Dots"], 0, action = self.setViewMode)
-        self.viewModeLabel = Label(self.UILayer, 15, (330, 235), "SE", "View Mode", (200, 200, 200))
+        self.viewModeLabel = Label(self.UILayer, 15, (330, 235), "SE", "View Mode", self.colours["white"])
 
         self.configAccordion = Accordion(self.UILayer, (50, 50), "SE", (305, 535), "Untitled Track",
                                          [self.saveButton, self.saveAsButton, self.openTrackButton, self.newTrackButton,
@@ -293,7 +297,7 @@ class TrackEditor (Scene):
                                           self.redoButton, self.redoIcon])
 
         self.trackScaleLabel = Label(self.UILayer, 15, (180, 30), "S", "", self.colours["white"])
-        self.scalingErrorLabel = Label(self.UILayer, 12, (20, 60), "S", "", (227, 65, 50))
+        self.scalingErrorLabel = Label(self.UILayer, 12, (20, 60), "S", "", (227, 65, 50), show = False)
 
         self.finishIcon = Image(self.trackLayer, (0, 0), "", directories["finishLine"], 1, colour = (self.colours["white"]), show = False)
         self.finishDirIcon = Image(self.trackLayer, (0, 0), "", directories["arrow"], 1, colour = (self.colours["white"]), show = False)
@@ -308,30 +312,29 @@ class TrackEditor (Scene):
         self.getUserPreferences()
         self.userValues = self.returnUserValues()
 
+        self.createDatabase()
         self.checkForDeletedTracks()
 
         self.checkedForUpdates = False
         self.updateNeeded = False
         self.latestCommitSHA = None
 
-        if len(sys.argv) > 1:
-            self.openTrack(sys.argv[1])
-
     def showHelp(self):
         if self.helpWindow in self.UILayer.elements:
             self.helpWindow.close()
         else:
-            self.helpWindow = Message(self.UILayer, "Help", ["Click to add a point to the track",
+            self.helpWindow = Message(self.UILayer, "Help", ["Click to add a point to the end of the track",
                                                          "Clicking on the track will insert a point at that location",
                                                          "Right-click on a point to remove it",
                                                          "Drag points to reposition them as needed",
                                                          "",
-                                                         "“Switch Front” changes which end new points are added to",
-                                                         "“Auto Res” selects the best resolution for the track",
-                                                         "“Racing Line” displays the fastest path around the track",
-                                                         "Select “Set Finish” to place the finish line",
-                                                         "“Set Scale” scales the track using a real-world distance"], dimensions = (550, 315), messageFontSize = 13, align = "left", lineSpacing = 23)
+                                                         '"Switch Front" changes which end new points are added to',
+                                                         '"Auto Res" selects the best resolution for the track',
+                                                         '"Racing Line" displays the fastest path around the track',
+                                                         'Select "Set Finish" to place the finish line',
+                                                         '"Set Scale" scales the track using a real-world distance'], dimensions = (550, 315), messageFontSize = 13, align = "left", lineSpacing = 23)
 
+    #An update has been detected, the user is prompted to update
     def askToUpdate(self):
         def ignoreUpdate():
             with open(directories["preferences"]) as loadFile:
@@ -344,6 +347,7 @@ class TrackEditor (Scene):
         
         Message(self.UILayer, "Update Available", "Download the latest version from GitHub now", "Ignore", ignoreUpdate, "grey", "View", lambda: webbrowser.open(githubRepoAddress), "grey")
 
+    #Determines whether user should be prompted to update (e.g. has the current update already been ignored)
     def setUpdateNeeded(self, sha):
         self.latestCommitSHA = sha
         with open(directories["preferences"]) as loadFile:
@@ -376,9 +380,11 @@ class TrackEditor (Scene):
 
             self.antialiasingSwitch.updateValue(preferenceData["antialiasing"])
 
+    #Returns values used in user preferences
     def returnUserValues(self):
         return [self.trackResSlider.value, self.autoResSwitch.value, self.antialiasingSwitch.value, self.racingLineSwitch.value]
 
+    #Checks (on startup) whether any tracks have been deleted. If so, its leaderboard is deleted
     def checkForDeletedTracks(self):
         def SQLReady(UUID):
             return f'"{UUID}"'
@@ -402,23 +408,34 @@ class TrackEditor (Scene):
 
         conn = sqlite3.connect(directories["raceTimes"])
         cursor = conn.cursor()
-        cursor.execute(f'''DELETE FROM TIMES WHERE UUID NOT IN ({SQLUUIDlist})''')
+        cursor.execute(f'''DELETE FROM TIMES WHERE TrackUUID NOT IN ({SQLUUIDlist})''')
         conn.commit()
         conn.close()
 
+    def createDatabase(self):
+        databaseDir = os.path.dirname(directories["raceTimes"])
+        if not os.path.exists(databaseDir):
+            os.makedirs(databaseDir)
+        conn = sqlite3.connect(directories["raceTimes"])
+        cursor = conn.cursor()
+        cursor.execute(f'''CREATE TABLE IF NOT EXISTS TIMES (TrackUUID TEXT, time REAL, date TEXT)''')
+        conn.commit()
+        conn.close()
+
+    #Ensures file is a valid track
     def validateTrackFile(self, directory):
-        error = False
+        valid = True
         try:
             with open(directory) as loadFile:
                 try:
                     trackData = json.load(loadFile)
                     validate(instance = trackData, schema = self.trackFileSchema)
                 except:
-                    error = True
+                    valid = False
         except:
-            error = True
+            valid = False
 
-        return not error
+        return valid
 
     #Fit track to screen, in the middle
     def recentreFrame(self):
@@ -452,6 +469,7 @@ class TrackEditor (Scene):
         if self.referenceImage is not None:
             self.scaledReferenceImage = pygame.transform.scale_by(self.referenceImage, (self.zoom * self.referenceImageScale))
 
+    #Sets up variables, ready for scaling
     def setScale(self):
         self.userSettingScale = True
         self.setScalePoint1 = None
@@ -463,10 +481,12 @@ class TrackEditor (Scene):
             actualDistance = float(text)
         except:
             actualDistance = None
+            self.scalingErrorLabel.show = True
             self.scalingErrorLabel.text = "Please enter a valid number"
 
         if actualDistance is not None:
             if actualDistance == 0:
+                self.scalingErrorLabel.show = True
                 self.scalingErrorLabel.text = "Please enter a number greater than 0"
             else:
                 screenDistance = pointDistance(self.setScalePoint1, self.setScalePoint2)
@@ -476,11 +496,12 @@ class TrackEditor (Scene):
                 self.realDistanceTextInput.show = False
                 self.userSettingScale = False
                 self.track.calculateLength()
-                self.scalingErrorLabel.text = ""
+                self.scalingErrorLabel.show = False
                 self.track.history.addAction("SET SCALE", [trackScale])
 
                 self.recentreFrame()
 
+    #Sets up variables, ready for scaling
     def setFinish(self):
         self.userSettingFinish = True
         self.finishIndex = None
@@ -526,20 +547,25 @@ class TrackEditor (Scene):
 
             return error
         def getFileName():
-            root = tk.Tk()
-            logo = tk.PhotoImage(file = directories["logo"])
-            root.iconphoto(True, logo)
+            try:
+                root = tk.Tk()
+                logo = tk.PhotoImage(file = directories["logo"])
+                root.iconphoto(True, logo)
 
-            root.withdraw()
-            root.wm_attributes('-topmost', 1)
-            imageExtensions = r"*.png *.jpeg *.jpg *.ppm *.gif *.tiff *.bmp"
-            fileSelected = askopenfilename(title = "Open Image", filetypes = [("Images", imageExtensions)])
-            root.destroy()
-            return fileSelected
+                root.withdraw()
+                root.wm_attributes('-topmost', 1)
+                imageExtensions = r"*.png *.jpeg *.jpg *.ppm *.gif *.tiff *.bmp"
+                fileSelected = askopenfilename(title = "Open Image", filetypes = [("Images", imageExtensions)])
+                root.destroy()
+                return fileSelected
+            except:
+                return None
 
         if imageDirectory is None:
             tempDirectory = getFileName()
-            if tempDirectory != '':
+            if tempDirectory is None:
+                Message(self.UILayer, "Error", "There was a problem setting the reference image", "OK", "close", "grey")
+            elif tempDirectory != '':
                 validDir = os.path.isfile(tempDirectory)
                 if not validDir:
                     Message(self.UILayer, "Invalid File", "Please select a valid file", "OK", "close", "grey")
@@ -584,7 +610,7 @@ class TrackEditor (Scene):
             pygame.draw.line(screen, lineColor, (0, y), (self.screenWidth, y), lineWidth)
 
     #Saves track to directory specified by user.
-    def saveTrack(self, saveNewDirectory = False):
+    def saveTrack(self, save_as = False, postSaveAction = None):
         trackData = self.track.getSaveState()
         trackData["properties"]["referenceImageScale"] = self.referenceImageScale
 
@@ -595,15 +621,31 @@ class TrackEditor (Scene):
                     pygame.display.set_caption(os.path.splitext(os.path.basename(receivedName))[0] + " - " + receivedName)
                     self.saveDirectory = receivedName
                     self.track.save()
+                    if postSaveAction is not None:
+                        postSaveAction()
 
             except Exception as error:
                 Message(self.UILayer, "Can't Save", str(error), "OK", "close", "grey")
                 self.saveDirectory = None
 
-        if saveNewDirectory or self.saveDirectory is None:
-            fileSaver = FileSaver(self.UILayer, directories["tracks"], saveToFile)
-        else:
+        def saveTrackFirst():
             saveToFile(self.saveDirectory)
+            saveLogic()
+
+        def saveLogic():
+            if save_as or self.saveDirectory is None:
+                actionText = None
+                if save_as:
+                    actionText = "Save As"
+                FileSaver(self.UILayer, directories["tracks"], saveToFile, actionText = actionText)
+            else:
+                saveToFile(self.saveDirectory)
+
+        if save_as and not self.track.isSaved():
+            Message(self.UILayer, "Save Track First?", "This track has unsaved changes", "Save", saveTrackFirst,
+                    "grey", "Discard", saveLogic, "red")
+        else:
+            saveLogic()
 
     #Opens track from specific directory specified by user. Track is checked first
     def openTrack(self, tempDirectory = None):
@@ -666,16 +708,15 @@ class TrackEditor (Scene):
 
         def directoryReceived(receivedDir):
             def saveTrackFirst():
-                self.saveTrack()
-                loadTrack(receivedDir)
+                self.saveTrack(postSaveAction = lambda: loadTrack(receivedDir))
 
             def discardTrack():
                 if self.saveDirectory is None:
                     deleteTrackTimes(self.track.UUID)
                 loadTrack(receivedDir)
 
-            if receivedDir != '' and self.track.isSaved() == False:
-                Message(self.UILayer, "Sure?", "You currently have an unsaved track open", "Save", saveTrackFirst,
+            if receivedDir != '' and not self.track.isSaved():
+                Message(self.UILayer, "Save Track First?", "You currently have an unsaved track open", "Save", saveTrackFirst,
                         "grey", "Discard", discardTrack, "red")
             else:
                 loadTrack(receivedDir)
@@ -688,8 +729,8 @@ class TrackEditor (Scene):
     #Clears current track, asks user before clearing
     def newTrack(self, force = False):
         def saveTrackFirst():
-            self.saveTrack()
-            clearTrackSequence()
+            self.saveTrack(postSaveAction = clearTrackSequence)
+
 
         def discardTrack():
             if self.saveDirectory is None:
@@ -718,7 +759,7 @@ class TrackEditor (Scene):
                 self.recentreFrame()
 
         if not self.track.isSaved():
-            Message(self.UILayer, "Sure?", "You currently have an unsaved track open", "Save", saveTrackFirst, "grey",
+            Message(self.UILayer, "Save Track First?", "You currently have an unsaved track open", "Save", saveTrackFirst, "grey",
                     "Discard", discardTrack, "red")
 
         elif self.saveDirectory is not None:
@@ -729,6 +770,10 @@ class TrackEditor (Scene):
             self.recentreFrame()
 
     def deleteTrack(self, fileDir):
+        with open(fileDir) as trackFile:
+            trackUUID = json.load(trackFile)["UUID"]
+            deleteTrackTimes(trackUUID)
+
         os.remove(fileDir)
         if fileDir == self.saveDirectory:
             self.newTrack(force = True)
@@ -754,7 +799,7 @@ class TrackEditor (Scene):
             running = False
 
         if self.closeCount == 0:
-            Message(self.UILayer, "Sure?", "You currently have an unsaved track open", "Save",
+            Message(self.UILayer, "Save Track First?", "You currently have an unsaved track open", "Save",
                                         saveTrackFirst, "grey", "Discard", discardTrack, "red", closeError)
         self.closeCount += 1
 
@@ -894,6 +939,7 @@ class TrackEditor (Scene):
                 if event.type == pygame.KEYDOWN:
                     if event.key == pygame.K_ESCAPE:
                         self.realDistanceTextInput.show = False
+                        self.scalingErrorLabel.show = False
                         self.userSettingScale = False
 
             #Logic for setting finish
@@ -927,16 +973,17 @@ class TrackEditor (Scene):
 
         screen.fill(self.colours["background"])
 
-
+        #Checks if update is available
         if not self.checkedForUpdates:
-            isUpdateRequired(__file__, self.setUpdateNeeded)
+            isUpdateRequired(__file__, githubRepoAddress, self.setUpdateNeeded)
             self.checkedForUpdates = True
 
         if self.updateNeeded:
             self.updateNeeded = False
             self.askToUpdate()
 
-        if (self.previousScreenWidth != self.screenWidth) or (self.previousScreenHeight != self.screenHeight):
+        #Ensures track remains the same size when the user changes the window size (maximises/minimises)
+        if ((self.previousScreenWidth != self.screenWidth) or (self.previousScreenHeight != self.screenHeight)) and (len(self.track.points) >= 1):
             widthDiff = abs(self.screenWidth - self.previousScreenWidth)
             heightDiff = abs(self.screenHeight - self.previousScreenHeight)
             if widthDiff > heightDiff:
@@ -960,7 +1007,7 @@ class TrackEditor (Scene):
 
         self.track.showRacingLine = self.racingLineSwitch.value
 
-        self.drawGrid(self.offsetPosition, 50 * self.zoom, 1, self.colours["innerGrid"])
+        self.drawGrid(self.offsetPosition, 50 * self.zoom, 1, self.colours["grid"])
 
         screenRect = pygame.Rect((0, 0), (self.screenWidth + 15, self.screenHeight + 15))
 
@@ -1006,9 +1053,9 @@ class TrackEditor (Scene):
                 lineEnd_EndStop = [calculateSide([lineStart, lineEnd], 1, 20),
                                    calculateSide([lineStart, lineEnd], 1, -20)]
 
-                pygame.draw.line(screen, (200, 200, 200), lineStart, lineEnd, 5)
-                pygame.draw.line(screen, (200, 200, 200), lineStart_EndStop[0], lineStart_EndStop[1], 5)
-                pygame.draw.line(screen, (200, 200, 200), lineEnd_EndStop[0], lineEnd_EndStop[1], 5)
+                pygame.draw.line(screen, self.colours["white"], lineStart, lineEnd, 5)
+                pygame.draw.line(screen, self.colours["white"], lineStart_EndStop[0], lineStart_EndStop[1], 5)
+                pygame.draw.line(screen, self.colours["white"], lineEnd_EndStop[0], lineEnd_EndStop[1], 5)
 
         #Allows user to set whether track is clockwise or anticlockwise
         self.finishHelpLabel.show = False
@@ -1033,6 +1080,7 @@ class TrackEditor (Scene):
             self.finishIndex = self.track.finishIndex
             self.finishDir = self.track.finishDir
 
+        #Resets finish line position if invalid
         if self.finishIndex is not None:
             if ((len(self.track.points) - 1) < self.finishIndex) or (self.finishIndex < 0):
                 self.track.finishIndex = None
@@ -1129,6 +1177,11 @@ class TrackEditor (Scene):
         else:
             self.setScaleButton.disabled = False
 
+        if self.saveDirectory is None:
+            self.saveAsButton.disabled = True
+        else:
+            self.saveAsButton.disabled = False
+
         #Determines whether track length should be in m or km
         if self.track.scale is not None:
             trackScaleReduced = int((self.track.scale * 150) / self.zoom)
@@ -1140,9 +1193,9 @@ class TrackEditor (Scene):
 
             self.trackScaleLabel.text = str(trackScaleReduced) + "m  | " + lengthText
 
-            pygame.draw.line(screen, (200, 200, 200), (20, self.screenHeight - 35), (20, self.screenHeight - 20), 2)
-            pygame.draw.line(screen, (200, 200, 200), (20, self.screenHeight - 20), (170, self.screenHeight - 20), 2)
-            pygame.draw.line(screen, (200, 200, 200), (170, self.screenHeight - 35), (170, self.screenHeight - 20), 2)
+            pygame.draw.line(screen, self.colours["white"], (20, self.screenHeight - 35), (20, self.screenHeight - 20), 2)
+            pygame.draw.line(screen, self.colours["white"], (20, self.screenHeight - 20), (170, self.screenHeight - 20), 2)
+            pygame.draw.line(screen, self.colours["white"], (170, self.screenHeight - 35), (170, self.screenHeight - 20), 2)
         else:
             self.trackScaleLabel.text = ""
 
@@ -1176,22 +1229,21 @@ class TrackRacing (Scene):
         self.accelerationInput = [0, 0]
 
         self.colours = {"background": (101, 126, 51),
-                        "curve": (128, 128, 128),
                         "controlPoint": (24, 150, 204),
-                        "frontControlPoint": (204, 138, 24),
-                        "mainGrid": (30, 30, 30),
-                        "innerGrid": (25, 25, 25),
                         "white": (200, 200, 200),
                         "track": (100, 100, 100)}
 
         self.mainFont = directories["mainFont"]
 
         self.UILayer = Layer(screen, pygame, mainFont, directories)
+
         self.speedometer = Label(self.UILayer, 30, (180, 100), "SE", "121mph", self.colours["white"], bold = True)
-        self.timer = Label(self.UILayer, 17, (180, 65), "SE", "00:00.00", (200, 200, 200))
+        self.timer = Label(self.UILayer, 17, (180, 65), "SE", "00:00.00", self.colours["white"])
+        self.ranking = Label(self.UILayer, 17, (180, 45), "SE", "1st", self.colours["white"], show = False)
 
         self.speedometer2 = Label(self.UILayer, 30, (180, 100), "SW", "121mph", self.colours["white"], bold = True)
-        self.timer2 = Label(self.UILayer, 17, (180, 65), "SW", "00:00.00", (200, 200, 200))
+        self.timer2 = Label(self.UILayer, 17, (180, 65), "SW", "00:00.00", self.colours["white"])
+        self.ranking2 = Label(self.UILayer, 17, (180, 45), "SH", "2nd", self.colours["white"], show = False)
 
         self.racePos = Label(self.UILayer, 30, (0, 80), "NW", "1st", (215, 183, 64), True)
 
@@ -1200,8 +1252,9 @@ class TrackRacing (Scene):
         font = pygame.freetype.Font(directories["mainFont"], 30)
         font.strong = True
         textSize = font.get_rect("SLOW!")
-        font.render_to(self.slowSign, ((150 // 2) - (textSize.width // 2), (50 // 2) - (textSize.height // 2)), "SLOW!", (200, 200, 200))
+        font.render_to(self.slowSign, ((150 // 2) - (textSize.width // 2), (50 // 2) - (textSize.height // 2)), "SLOW!", self.colours["white"])
 
+        #Settings accordion
         self.viewLeaderboardButton = Button(self.UILayer, (90, 310), "SW", (200, 40), "View Leaderboard", 15, (100, 100, 100), action = self.viewLeaderboard)
         self.leaderboardView = None
 
@@ -1209,21 +1262,21 @@ class TrackRacing (Scene):
         self.controlsView = None
 
         self.deleteRaceTimesButton = Button(self.UILayer, (105, 335), "SE", (30, 30), "", 12, (66, 41, 41), action = self.deleteRaceTimes, show = False)
-        self.deleteRaceTimesIcon = Image(self.UILayer, (self.deleteRaceTimesButton.posX - 1, self.deleteRaceTimesButton.posY - 1), "SE", directories["bin"], 0.7, colour = (200, 200, 200), show = False)
+        self.deleteRaceTimesIcon = Image(self.UILayer, (self.deleteRaceTimesButton.posX - 1, self.deleteRaceTimesButton.posY - 1), "SE", directories["bin"], 0.7, colour = self.colours["white"], show = False)
 
-        self.zoomAdjustmentSlider = Slider(self.UILayer, 15, (200, 200, 200), self.colours["controlPoint"], (140, 190), "SW", 1, 105, (self.lowerZoomLimit, self.upperZoomLimit), 2.0001, precision = 1, increment = 0.1, action = self.updateZoom, suffix = 'x', finishedUpdatingAction = lambda x = None, y = None: self.updateUserPreferences())
-        self.zoomAdjustmentLabel = Label(self.UILayer, 15, (80, 192), "SW", "Zoom", (200, 200, 200))
+        self.zoomAdjustmentSlider = Slider(self.UILayer, 15, self.colours["white"], self.colours["controlPoint"], (140, 190), "SW", 1, 105, (self.lowerZoomLimit, self.upperZoomLimit), 2.0001, precision = 1, increment = 0.1, action = self.updateZoom, suffix = 'x', finishedUpdatingAction = lambda x = None, y = None: self.updateUserPreferences())
+        self.zoomAdjustmentLabel = Label(self.UILayer, 15, (80, 192), "SW", "Zoom", self.colours["white"])
 
         self.multiplayerSwitch = Switch(self.UILayer, (250, 160), "SW", 0.8, value = False, action = self.toggleMultiplayer)
-        self.multiplayerLabel = Label(self.UILayer, 15, (98, 158), "SW", "Split-screen", (200, 200, 200))
+        self.multiplayerLabel = Label(self.UILayer, 15, (98, 158), "SW", "Split-screen", self.colours["white"])
         self.multiplayerSwitch.trueColour = (38, 87, 38)
 
         self.speedWarningSwitch = Switch(self.UILayer, (250, 130), "SW", 0.8, value = False, action = self.toggleSpeedWarnings)
-        self.speedWarningLabel = Label(self.UILayer, 15, (80, 128), "SW", "Speed Warnings", (200, 200, 200))
+        self.speedWarningLabel = Label(self.UILayer, 15, (80, 128), "SW", "Speed Warnings", self.colours["white"])
         self.speedWarningSwitch.trueColour = (38, 87, 38)
 
         self.racingLineSwitch = Switch(self.UILayer, (250, 100), "SW", 0.8, value = False, action = self.toggleRacingLine)
-        self.racingLineLabel = Label(self.UILayer, 15, (107, 98), "SW", "Racing Line", (200, 200, 200))
+        self.racingLineLabel = Label(self.UILayer, 15, (107, 98), "SW", "Racing Line", self.colours["white"])
         self.racingLineSwitch.trueColour = (38, 87, 38)
 
         self.settingsAccordion = Accordion(self.UILayer, (50, 50), "SW", (280, 325), "Settings",
@@ -1232,28 +1285,29 @@ class TrackRacing (Scene):
                                             self.speedWarningLabel, self.racingLineSwitch, self.racingLineLabel], openDir = "r")
 
 
-        self.controlsKeyW = KeyboardKeyIcon(self.UILayer, (0, 120), "c", "W", show = False)
-        self.controlsKeyA = KeyboardKeyIcon(self.UILayer, (32, 88), "c", "A", show = False)
-        self.controlsKeyS = KeyboardKeyIcon(self.UILayer, (0, 88), "c", "S", show = False)
-        self.controlsKeyD = KeyboardKeyIcon(self.UILayer, (-32, 88), "c", "D", show = False)
+        #Controls page keys
+        self.controlsKeyW = KeyboardKeyIcon(self.UILayer, (0, 120), "vh", "W", show = False)
+        self.controlsKeyA = KeyboardKeyIcon(self.UILayer, (32, 88), "vh", "A", show = False)
+        self.controlsKeyS = KeyboardKeyIcon(self.UILayer, (0, 88), "vh", "S", show = False)
+        self.controlsKeyD = KeyboardKeyIcon(self.UILayer, (-32, 88), "vh", "D", show = False)
 
-        self.orLabel = Label(self.UILayer, 15, (-80, 98), "c", "OR", (200, 200, 200), bold = True, show = False)
+        self.orLabel = Label(self.UILayer, 15, (-80, 98), "vh", "OR", self.colours["white"], bold = True, show = False)
 
-        self.controlsKeyUp = KeyboardKeyIcon(self.UILayer, (-150, 120), "c", "↑", show = False)
-        self.controlsKeyLeft = KeyboardKeyIcon(self.UILayer, (-118, 88), "c", "←", show = False)
-        self.controlsKeyDown = KeyboardKeyIcon(self.UILayer, (-150, 88), "c", "↓", show = False)
-        self.controlsKeyRight = KeyboardKeyIcon(self.UILayer, (-182, 88), "c", "→", show = False)
+        self.controlsKeyUp = KeyboardKeyIcon(self.UILayer, (-150, 120), "vh", "↑", show = False)
+        self.controlsKeyLeft = KeyboardKeyIcon(self.UILayer, (-118, 88), "vh", "←", show = False)
+        self.controlsKeyDown = KeyboardKeyIcon(self.UILayer, (-150, 88), "vh", "↓", show = False)
+        self.controlsKeyRight = KeyboardKeyIcon(self.UILayer, (-182, 88), "vh", "→", show = False)
 
-        self.controlsKeyR = KeyboardKeyIcon(self.UILayer, (0, 26), "c", "R", show = False)
-        self.controlsKeyP = KeyboardKeyIcon(self.UILayer, (0, -24), "c", "P", show = False)
-        self.controlsKeyL = KeyboardKeyIcon(self.UILayer, (0, -74), "c", "L", show = False)
-        self.controlsKeyC = KeyboardKeyIcon(self.UILayer, (0, -124), "c", "C", show = False)
+        self.controlsKeyR = KeyboardKeyIcon(self.UILayer, (0, 26), "vh", "R", show = False)
+        self.controlsKeyP = KeyboardKeyIcon(self.UILayer, (0, -24), "vh", "P", show = False)
+        self.controlsKeyL = KeyboardKeyIcon(self.UILayer, (0, -74), "vh", "L", show = False)
+        self.controlsKeyC = KeyboardKeyIcon(self.UILayer, (0, -124), "vh", "C", show = False)
 
-        self.movementLabel = Label(self.UILayer, 20, (169, 90), "c", "Movement:", (200, 200, 200), show = False)
-        self.resetLabel = Label(self.UILayer, 20, (133, 20), "c", "Reset:", (200, 200, 200), show = False)
-        self.pauseLabel = Label(self.UILayer, 20, (133, -30), "c", "Pause:", (200, 200, 200), show = False)
-        self.viewLeaderboardLabel = Label(self.UILayer, 20, (205, -80), "c", "Leaderboard:", (200, 200, 200), show = False)
-        self.viewControlsLabel = Label(self.UILayer, 20, (169, -130), "c", "Controls:", (200, 200, 200), show = False)
+        self.movementLabel = Label(self.UILayer, 20, (169, 90), "vh", "Movement:", self.colours["white"], show = False)
+        self.resetLabel = Label(self.UILayer, 20, (133, 20), "vh", "Reset:", self.colours["white"], show = False)
+        self.pauseLabel = Label(self.UILayer, 20, (133, -30), "vh", "Pause:", self.colours["white"], show = False)
+        self.viewLeaderboardLabel = Label(self.UILayer, 20, (205, -80), "vh", "Leaderboard:", self.colours["white"], show = False)
+        self.viewControlsLabel = Label(self.UILayer, 20, (169, -130), "vh", "Controls:", self.colours["white"], show = False)
 
         self.controlsUI = [self.controlsKeyW, self.controlsKeyA, self.controlsKeyS, self.controlsKeyD,
                            self.controlsKeyUp, self.controlsKeyLeft, self.controlsKeyDown, self.controlsKeyRight,
@@ -1264,6 +1318,7 @@ class TrackRacing (Scene):
         self.car2 = Car(pygame, screen, directories, self.trackEditor.track)
         self.speedWarnings = False
 
+        self.pauseImg = Image(self.UILayer, (13, 13), "vh", directories["pause"], 5, self.colours["white"], False)
         self.pause = False
         self.pauseStart = None
         self.userPaused = False
@@ -1301,14 +1356,17 @@ class TrackRacing (Scene):
             self.racingLineSwitch.updateValue(preferenceData["racingLine"])
             self.speedWarningSwitch.updateValue(preferenceData["speedWarnings"])
 
+    #Changes the zoom value
     def updateZoom(self, value):
         self.zoom = round(value, 1)
         self.reloadTrackSurface()
 
+    #Called when the track is changed, re-renders the track
     def reloadTrackSurface(self):
         self.track.showRacingLine = self.racingLineSwitch.value
         self.trackSurface, self.originOffset = self.track.renderToSurface(self.colours, self.zoom)
 
+    #Resets the position of the cars back to the start line
     def reset(self):
         self.car.reset(2 * int(self.splitScreen))
         self.car2.reset(-2 * int(self.splitScreen))
@@ -1316,11 +1374,14 @@ class TrackRacing (Scene):
 
         self.car.dead = False
         self.timer.text = secondToRaceTimer(0)
-        self.timer.colour = (200, 200, 200)
+        self.timer.colour = self.colours["white"]
+        self.ranking.show = False
 
         self.timer2.text = secondToRaceTimer(0)
-        self.timer2.colour = (200, 200, 200)
+        self.timer2.colour = self.colours["white"]
+        self.ranking2.show = False
 
+    #Deletes the race times for the currently open track
     def deleteRaceTimes(self):
         def delete():
             deleteTrackTimes(self.track.UUID)
@@ -1336,6 +1397,7 @@ class TrackRacing (Scene):
         Message(self.UILayer, "Sure?", "You are about to delete the race times for this track", "Cancel", cancel,
                         "grey", "Delete", delete, "red")
 
+    #Upload a new race time to the currently open track
     def uploadTime(self, raceTime):
         conn = sqlite3.connect(directories["raceTimes"])
         cursor = conn.cursor()
@@ -1343,22 +1405,46 @@ class TrackRacing (Scene):
         conn.commit()
         conn.close()
 
-    def deleteSlowTimes(self):
-        times = self.getTimes(self.track.UUID)
-        if len(times) > 10:
-            slowestAcceptableTime = times[9]
+    #Returns what ranking (e.g. 1st, 3rd, 54th) a race time is, and returns the corresponding colour (e.g. gold for first)
+    def getRaceTimeRanking(self, raceTime):
+        firstColour = (191, 161, 0) #Gold
+        secondColour = (160, 160, 160) #Silver
+        thirdColour = (205, 127, 50) #Bronze
+        otherColour = self.colours["white"] #White
 
-            conn = sqlite3.connect(directories["raceTimes"])
-            cursor = conn.cursor()
-            cursor.execute(f'''DELETE FROM TIMES WHERE UUID = "{self.track.UUID}" and (time > {slowestAcceptableTime[0]} or (time = {slowestAcceptableTime[0]} and date > "{slowestAcceptableTime[1]}"))''')
-            conn.commit()
-            conn.close()
+        allTimes = self.getTimes(self.track.UUID, excludeDate = True)
+        ranking = allTimes.index(raceTime) + 1
+        suffix = "th"
+        onesNumbers = str(ranking)[-1]
+        tensNumbers = str(ranking)[-2:]
+        if onesNumbers == "1" and tensNumbers != "11":
+            suffix = "st"
+        elif onesNumbers == "2" and tensNumbers != "12":
+            suffix = "nd"
+        elif onesNumbers == "3" and tensNumbers != "13":
+            suffix = "rd"
 
-    def getTimes(self, UUID):
+        if ranking == 1:
+            colour = firstColour
+        elif ranking == 2:
+            colour = secondColour
+        elif ranking == 3:
+            colour = thirdColour
+        else:
+            colour = otherColour
+
+        return f"{ranking}{suffix}", colour
+
+    #Fetches the race times for the currently open track
+    def getTimes(self, UUID, excludeDate = False):
         conn = sqlite3.connect(directories["raceTimes"])
         cursor = conn.cursor()
-        cursor.execute(f"SELECT time, date FROM TIMES WHERE UUID = '{UUID}' ORDER BY time, date")
-        times = cursor.fetchall()
+        if excludeDate:
+            cursor.execute(f"SELECT time FROM TIMES WHERE TrackUUID = '{UUID}' ORDER BY time")
+            times = [timeTuple[0] for timeTuple in cursor.fetchall()]
+        else:
+            cursor.execute(f"SELECT time, date FROM TIMES WHERE TrackUUID = '{UUID}' ORDER BY time, date")
+            times = cursor.fetchall()
         return times
 
     def toggleMultiplayer(self, value):
@@ -1380,10 +1466,10 @@ class TrackRacing (Scene):
         self.leaderboardView.close()
 
     def viewLeaderboard(self):        
-        if self.controlsView in self.UILayer.elements:
+        if self.controlsView in self.UILayer.elements: #Closes controls view if opened
             self.closeControls()
 
-        if self.leaderboardView in self.UILayer.elements:
+        if self.leaderboardView in self.UILayer.elements: #Closes leaderboard view if already opened
             self.closeLeaderboard()
         else:
             times = self.getTimes(self.track.UUID)
@@ -1401,7 +1487,7 @@ class TrackRacing (Scene):
                         leaderboardMessages.append(lineText)
                     else:
                         number = "{:>2}".format(i + 1)
-                        formattedNumber = "{:<15}".format(f"{number}.")
+                        formattedNumber = "{:<16}".format(f"{number}.")
                         lineText = f"{formattedNumber}-          "
                         leaderboardMessages.append(lineText)
 
@@ -1416,10 +1502,10 @@ class TrackRacing (Scene):
         self.controlsView.close()
 
     def viewControls(self):
-        if self.leaderboardView in self.UILayer.elements:
+        if self.leaderboardView in self.UILayer.elements: #Closes leaderboard view if opened
             self.closeLeaderboard()
 
-        if self.controlsView in self.UILayer.elements:
+        if self.controlsView in self.UILayer.elements: #Closes controls view if already opened
             self.closeControls()
         else:
             for element in self.controlsUI:
@@ -1427,8 +1513,13 @@ class TrackRacing (Scene):
 
             self.controlsView = Message(self.UILayer, "Controls", "", dimensions = (500, 370), layerIndex = 0, closeAction = self.closeControls)
 
-    def togglePause(self, userPaused = False):
-        self.pause = not self.pause
+    #Pauses and un-pauses the timer
+    def setPause(self, newValue = None, userPaused = False):
+        if newValue is None:
+            self.pause = not self.pause
+        else:
+            self.pause = newValue
+
         if self.pause:
             self.userPaused = userPaused
             self.pauseStart = time.time()
@@ -1439,6 +1530,8 @@ class TrackRacing (Scene):
 
             self.pauseStart = None
 
+    #Called if track changes, used to update what points make up the minimap.
+    #This includes scaling the points so that the minimap always remains the same size
     def updateMiniMapPoints(self, width, height, thickness):
         self.miniMapThickness = thickness
         self.miniMapSurface = pygame.Surface((width, height), pygame.SRCALPHA)
@@ -1471,9 +1564,9 @@ class TrackRacing (Scene):
 
         polygon = formPolygon(leftSide, rightSide, close = self.track.closed)
 
-        pygame.draw.aalines(self.miniMapSurface, (200, 200, 200), self.track.closed, leftSide)
-        pygame.draw.aalines(self.miniMapSurface, (200, 200, 200), self.track.closed, rightSide)
-        pygame.draw.polygon(self.miniMapSurface, (200, 200, 200), polygon)
+        pygame.draw.aalines(self.miniMapSurface, self.colours["white"], self.track.closed, leftSide)
+        pygame.draw.aalines(self.miniMapSurface, self.colours["white"], self.track.closed, rightSide)
+        pygame.draw.polygon(self.miniMapSurface, self.colours["white"], polygon)
 
     def displayMiniMap(self, pos, positions):
         actualX = self.screenWidth - pos[0]
@@ -1486,7 +1579,6 @@ class TrackRacing (Scene):
             pygame.gfxdraw.filled_circle(miniMapWithCarSurface, int(carPos[0]), int(carPos[1]), 4, colours[car % 2])
 
         screen.blit(miniMapWithCarSurface, (actualX, actualY))
-
 
     #Where all the events are passed to be processed
     def handleEvents(self, events):
@@ -1515,7 +1607,7 @@ class TrackRacing (Scene):
                     if (self.accelerationInput[0] + self.accelerationInput[1] == 0) or not self.splitScreen:
                         self.reset()
                 if event.key == pygame.K_p:
-                    self.togglePause(True)
+                    self.setPause(userPaused = True)
                 if event.key == pygame.K_l:
                     self.viewLeaderboard()
                 if event.key == pygame.K_c:
@@ -1551,6 +1643,7 @@ class TrackRacing (Scene):
             self.uniquenessToken = self.track.getUniquenessToken()
             self.previousTrackUUID = self.track.UUID
 
+        #If the start-timer has started for either of the cars, minimise the settings.
         if (self.lastStartTimeCar != self.car.timerStart) or (self.lastStartTimeCar2 != self.car2.timerStart):
             if (self.car.timerStart is not None) or (self.car2.timerStart is not None):
                 self.settingsAccordion.setCollapseStatus(True)
@@ -1562,7 +1655,7 @@ class TrackRacing (Scene):
 
         if self.splitScreen:
             acceleration = self.accelerationInput[0]
-            if self.car.timerStart is None and self.accelerationInput[1] == 0:
+            if self.car.timerStart is None and self.accelerationInput[1] == 0: #Stop car1 from moving if car2 hasn't started yet
                 acceleration = 0
             self.car.update(self.steeringInput[0], acceleration, deltaTime, self.pause)
 
@@ -1571,14 +1664,13 @@ class TrackRacing (Scene):
             rightSide.blit(self.trackSurface, (self.offsetPosition[0] - self.originOffset[0], self.offsetPosition[1] - self.originOffset[1]))
 
             acceleration = self.accelerationInput[1]
-            if self.car2.timerStart is None and self.accelerationInput[0] == 0:
+            if self.car2.timerStart is None and self.accelerationInput[0] == 0: #Stop car2 from moving if car1 hasn't started yet
                 acceleration = 0
             self.car2.update(self.steeringInput[1], acceleration, deltaTime, self.pause)
 
             self.offsetPosition = ((-self.car2.position.x * self.zoom) + (self.screenWidth / 4), (-self.car2.position.y * self.zoom) + (self.screenHeight / 2))
             leftSide = pygame.Surface(((self.screenWidth / 2), self.screenHeight), pygame.SRCALPHA)
             leftSide.blit(self.trackSurface, (self.offsetPosition[0] - self.originOffset[0], self.offsetPosition[1] - self.originOffset[1]))
-
 
             self.car.display(((-self.car.position.x * self.zoom) + (self.screenWidth / 4), (-self.car.position.y * self.zoom) + (self.screenHeight / 2)), self.zoom, appearance = 0, surface = rightSide)
             self.car2.display(((-self.car.position.x * self.zoom) + (self.screenWidth / 4), (-self.car.position.y * self.zoom) + (self.screenHeight / 2)), self.zoom, appearance = 1, bodyColour = (200, 0, 0), surface = rightSide)
@@ -1589,7 +1681,7 @@ class TrackRacing (Scene):
             screen.blit(leftSide, (0, 0))
             screen.blit(rightSide, ((self.screenWidth / 2), 0))
 
-            pygame.draw.line(screen, (200, 200, 200), ((self.screenWidth / 2), 0),((self.screenWidth / 2), self.screenHeight), 10)
+            pygame.draw.line(screen, self.colours["white"], ((self.screenWidth / 2) - 1, 0),((self.screenWidth / 2) - 1, self.screenHeight), 10)
 
         else:
             steering = min(self.steeringInput[0] + self.steeringInput[1], 1)
@@ -1602,25 +1694,36 @@ class TrackRacing (Scene):
             self.car.display(self.offsetPosition, self.zoom)
 
         def closeMessage():
-            self.togglePause()
+            self.setPause(newValue = False)
 
+        #Update for each car
         for car in [self.car, self.car2]:
             if car.crossedFinishLine:
                 if (car.timerEnd is None) and (car.timerStart is not None) and (not car.offTrack):
                     car.timerEnd = time.time()
                     validTime = not car.dead
                     if validTime:
-                        raceTime = float("{:.2f}".format(car.timerEnd - car.timerStart))
+                        raceTime = float("{:.3f}".format(car.timerEnd - car.timerStart))
 
                         times = self.getTimes(self.track.UUID)
                         if len(times) > 0:
                             if times[0][0] > raceTime:
-                                timeDifference = float("{:.2f}".format(times[0][0] - raceTime))
-                                self.togglePause(True)
+                                timeDifference = float("{:.3f}".format(times[0][0] - raceTime))
+                                self.setPause(newValue = True, userPaused = True)
                                 Message(self.UILayer, "New Highscore!", f"You beat the current highscore ({secondToRaceTimer(times[0][0])}) by {timeDifference}s" , "Continue", closeMessage, (100, 100, 100), linePadding = 10, closeAction = closeMessage)
 
                         self.uploadTime(raceTime)
-                        self.deleteSlowTimes()
+                        rankText, labelColour = self.getRaceTimeRanking(raceTime)
+                        if car is self.car:
+                            rankingLabel = self.ranking
+                        else:
+                            rankingLabel = self.ranking2
+
+                        rankingLabel.text = rankText
+                        labelWidth = rankingLabel.textSize[0]
+                        rankingLabel.colour = labelColour
+                        rankingLabel.posX = (136 + (labelWidth / 2))
+                        rankingLabel.show = True
 
         self.speedometer.text = f"{pixToMiles(self.car.velocity.x, self.car.scale)} mph"
         self.speedometer.posX = (self.speedometer.textSize[0] / 2) + (self.timer.posX - (self.timer.textSize[0] / 2))
@@ -1637,7 +1740,8 @@ class TrackRacing (Scene):
             else:
                 self.racePos.show = False
 
-            if (self.car.timerStart is not None) and (self.car.timerEnd is None):
+            #Compares positions of both cars and determines which is winning
+            if (self.car.timerStart is not None) and (self.car.timerEnd is None): #if car is still racing
                 startIndex = self.track.getStartPos()[2]
                 numOfPoints = len(self.track.splinePoints)
                 if self.car.nearestSplineIndex != self.car2.nearestSplineIndex:
@@ -1666,7 +1770,7 @@ class TrackRacing (Scene):
             self.timer2.show = False
             self.racePos.show = False
 
-        if not self.pause or (self.pause and self.car.timerEnd is not None):
+        if not self.pause or (self.pause and self.car.timerEnd is not None): #Update timer text
             if self.car.timerStart is not None:
                 timerEnd = time.time()
                 if self.car.timerEnd is not None:
@@ -1678,7 +1782,7 @@ class TrackRacing (Scene):
                 if self.car.dead:
                     self.timer.colour = (200, 0, 0)
                 else:
-                    self.timer.colour = (200, 200, 200)
+                    self.timer.colour = self.colours["white"]
 
         if self.splitScreen:
             if not self.pause or (self.pause and car.timerEnd is not None):
@@ -1693,12 +1797,15 @@ class TrackRacing (Scene):
                     if car.dead:
                         self.timer2.colour = (200, 0, 0)
                     else:
-                        self.timer2.colour = (200, 200, 200)
+                        self.timer2.colour = self.colours["white"]
 
         if self.pause:
             transparentSurface = pygame.Surface((self.screenWidth, self.screenHeight), pygame.SRCALPHA)
             pygame.draw.rect(transparentSurface, (50, 50, 50, 200), (0, 0, self.screenWidth, self.screenHeight))
             screen.blit(transparentSurface, (0, 0))
+            self.pauseImg.show = True
+        else:
+            self.pauseImg.show = False
 
         if self.deleteRaceTimesButton.show:
             self.deleteRaceTimesButton.posX = (self.screenWidth / 2) + 180
@@ -1736,6 +1843,7 @@ class TrackRacing (Scene):
                     futureBearing = bearing(splinePoints[futureIndex], splinePoints[(futureIndex + 1) % len(splinePoints)])
                     bearingDifference = abs(futureBearing - carBearing)
 
+                    #If car is going too fast for corner, show slow sign
                     if (self.track.calculateMaxCorneringSpeed(180 - bearingDifference) < car.velocity.x) and not car.offTrack:
                         posX = (self.screenWidth / 2) - 25
                         if self.splitScreen:
@@ -1755,7 +1863,6 @@ ProgramSceneManager.addScene(trackRacingScene, "Racing")
 
 ProgramSceneManager.setScene(0)
 
-
 while running:
     screenWidth, screenHeight = screen.get_size()
 
@@ -1763,6 +1870,7 @@ while running:
 
     ProgramSceneManager.updateCurrentScene()
     programUI.display(screenWidth, screenHeight, [])
+    ProgramSceneManager.programUpdate()
 
     fpsLabel.text = ("fps: " + str(int(clock.get_fps())))
 

@@ -1,5 +1,6 @@
 import os
 import time
+from utils import *
 
 import pygame
 
@@ -46,26 +47,26 @@ class UIElement:
         #Apply stickiness to position
         vertValid = not (("n" in self.stick) and ("s" in self.stick))
         horValid = not (("e" in self.stick) and ("w" in self.stick))
-        charValid = all([True for char in self.stick if char in ["n", "e", "s", "w", "c"]])
+        charValid = all([True for char in self.stick if char in ["n", "e", "s", "w", "v", "h"]])
 
         horStick = None
         vertStick = None
         for char in self.stick:
-            if char in ["n", "s", "c"]:
+            if char in ["n", "s", "v"]:
                 vertStick = char
-            if char in ["e", "w", "c"]:
+            if char in ["e", "w", "h"]:
                 horStick = char
 
 
         if vertValid and horValid and charValid and (len(self.stick) > 0):
             if horStick == "e":
                 contextualPosX = self.layer.screenWidth - self.posX
-            elif horStick == "c":
+            elif horStick == "h":
                 contextualPosX = (self.layer.screenWidth / 2) - self.posX
 
             if vertStick == "s":
                 contextualPosY = self.layer.screenHeight - self.posY
-            elif vertStick == "c":
+            elif vertStick == "v":
                 contextualPosY = (self.layer.screenHeight / 2) - self.posY
 
         self.contextualPosX, self.contextualPosY = contextualPosX, contextualPosY
@@ -169,6 +170,7 @@ class Label (UIElement):
         self.lastText = None
 
         self.font = layer.pygame.freetype.Font(layer.fontName, fontSize)
+        self.bold = bold
         self.font.strong = bold
 
         self.textSize = self.font.get_rect(self.text).size
@@ -178,11 +180,18 @@ class Label (UIElement):
     def update(self):
         self.updateContextualPos()
         if self.text != self.lastText:
-            self.textSize = self.font.get_rect(self.text).size
-            self.textSurface = pygame.Surface(self.textSize, self.layer.pygame.SRCALPHA)
-            self.font.render_to(self.textSurface, (0, 0), self.text, self.colour)
-            self.lastText = self.text
+            self.updateTextSize()
         self.boundingBox = self.layer.pygame.Rect((self.contextualPosX - 10, self.contextualPosY - 10), (self.textSize[0] + 20, self.textSize[1] + 20))
+
+    def updateFontSize(self, newFontSize):
+         self.font = self.layer.pygame.freetype.Font(self.layer.fontName, newFontSize)
+         self.font.strong = self.bold
+
+    def updateTextSize(self):
+        self.textSize = self.font.get_rect(self.text).size
+        self.textSurface = pygame.Surface(self.textSize, self.layer.pygame.SRCALPHA)
+        self.font.render_to(self.textSurface, (0, 0), self.text, self.colour)
+        self.lastText = self.text
 
     def display(self):
         self.layer.screen.blit(self.textSurface, (self.contextualPosX, self.contextualPosY))
@@ -460,6 +469,8 @@ class TextInput(UIElement):
         self.selected = True
 
         self.cursorIndex = 0
+        self.backSpaceInitialRemove = False
+        self.backSpacePressed = None
 
         self.show = show
 
@@ -467,6 +478,18 @@ class TextInput(UIElement):
 
     def update(self):
         self.updateContextualPos()
+        if pygame.key.get_pressed()[pygame.K_BACKSPACE] and self.backSpacePressed is None:
+            self.backSpacePressed = time.time()
+        elif not pygame.key.get_pressed()[pygame.K_BACKSPACE]:
+            self.backSpacePressed = None
+            self.backSpaceInitialRemove = False
+
+        if self.backSpacePressed is not None:
+            if not self.backSpaceInitialRemove or ((time.time() - self.backSpacePressed) > 0.5):
+                self.backSpaceInitialRemove = True
+                if self.cursorIndex > 0:
+                    self.text = self.text[:self.cursorIndex - 1] + self.text[self.cursorIndex:]
+                    self.cursorIndex = max(self.cursorIndex - 1, 0)
 
         if self.selected:
             if (time.time() - self.timeAtFlash) >= 0.5:
@@ -475,11 +498,6 @@ class TextInput(UIElement):
 
         for letter in self.layer.events:
             if letter.type == 768: #int version of 'pygame.KEYDOWN'
-                if letter.key == self.layer.pygame.K_BACKSPACE:
-                    if self.cursorIndex > 0:
-                        self.text = self.text[:self.cursorIndex - 1] + self.text[self.cursorIndex:]
-                        self.cursorIndex = max(self.cursorIndex - 1, 0)
-
                 if letter.key == self.layer.pygame.K_RIGHT:
                     self.cursorIndex += 1
 
@@ -529,7 +547,8 @@ class Accordion(UIElement):
         self.openDir = openDir
 
         self.titleText = title
-        self.titleLabel = Label(layer, 20, (0, 0), stick, self.titleText, (200, 200, 200))
+        self.fontSize = 20
+        self.titleLabel = Label(layer, self.fontSize, (0, 0), stick, self.titleText, (200, 200, 200))
 
         self.elements = elements + [self.titleLabel]
         self.collapse = collapse
@@ -564,9 +583,29 @@ class Accordion(UIElement):
             self.expandImage.posX, self.expandImage.posY = (self.posX + self.displayWidth - 38, (self.posY + self.displayHeight) - 12)
             self.collapseButton.posX, self.collapseButton.posY = (self.posX + self.displayWidth - 40, (self.posY + self.displayHeight) - 10)
 
-        self.titleLabel.text = self.titleText[:18]
-        if self.titleText[:18] != self.titleText:
-            self.titleLabel.text = self.titleText[:15] + "..."
+        fontSize = {19: 19,
+                    20: 17, 21: 17, 22: 17,
+                    23: 15, 24: 15,
+                    25: 14, 26: 14, 27: 14}
+
+        titleLength = len(self.titleText)
+        if 19 <= titleLength <= 27:
+            newFontSize = fontSize[titleLength]
+        else:
+            if titleLength > 27:
+                newFontSize = 14
+            else:
+                newFontSize = 20
+
+        if self.fontSize != newFontSize:
+            self.titleLabel.updateFontSize(newFontSize)
+            self.fontSize = newFontSize
+
+        self.titleLabel.text = self.titleText[:27]
+        if self.titleText[:27] != self.titleText:
+            self.titleLabel.text = self.titleText[:24] + "..."
+            if self.titleText[-1] == "*":
+                self.titleLabel.text += "*"
 
         if self.openDir == "l":
             self.titleLabel.posX, self.titleLabel.posY = ((self.displayWidth / 2) + (self.titleLabel.textSize[0] / 2) + self.posX, self.displayHeight - 25 + self.posY)
@@ -707,6 +746,11 @@ class Message(UIElement):
         self.posY = (self.layer.screenHeight / 2) - (self.height / 2)
         self.boundingBox = self.layer.pygame.Rect(self.posX, self.posY, self.width, self.height)
         posChanged = (oldX != self.posX) or (oldY != self.posY)
+
+        for event in self.layer.events:
+            if event.type == pygame.KEYDOWN:
+                if (event.key == pygame.K_RETURN) and (self.button2Action is None) and (self.button1Action is not None):
+                    self.buttonAction(self.button1Action)
 
         if (self.lastMessage != self.message) or posChanged:
             if isinstance(self.message, str):
@@ -931,6 +975,8 @@ class FilePicker(UIElement):
         self.itemIndexSelected = None
         self.selectedItem = None
 
+        self.framesTillOpen = None
+
         self.messageFont = layer.pygame.freetype.Font(layer.fontName, 18)
         self.titleFont = layer.pygame.freetype.Font(layer.fontName, 25)
         self.titleFont.strong = True
@@ -975,9 +1021,8 @@ class FilePicker(UIElement):
         self.renameTrackIcon.show = view
 
     def openTrack(self):
-        fileDirectory = os.path.join(self.directory, self.selectedItem)
-        self.openAction(fileDirectory)
-        self.closeWindow()
+        self.setView(False)
+        self.framesTillOpen = 2
 
     def deleteTrack(self):
         def removeFile():
@@ -985,10 +1030,12 @@ class FilePicker(UIElement):
                 self.deleteTrackAction(fileDirectory)
                 self.setView(True)
                 self.fileList = None
+        def cancel():
+            self.setView(True)
 
         fileDirectory = os.path.join(self.directory, self.selectedItem)
         self.setView(False)
-        Message(self.layer, "Delete Track", "Are you sure you want to delete this track?", "Cancel", "close", "grey", "Delete", removeFile, "red")
+        Message(self.layer, "Delete Track", f'Are you sure you want to delete "{getTrackName(self.selectedItem)}"', "Cancel", cancel, "grey", "Delete", removeFile, "red")
 
 
     def renameTrack(self):
@@ -1053,7 +1100,7 @@ class FilePicker(UIElement):
         mousePos = self.layer.pygame.mouse.get_pos()
         scrollHeight = 235 * self.viewProportion
         self.scrollBarHovering = (((self.boxCornerX + self.width) - 50 <= mousePos[0] <= ((self.boxCornerX + self.width) - 50) + 15) and
-                                  (self.boxCornerY + 60 + self.scrollHeight <= mousePos[1] <= (self.boxCornerY + 60 + self.scrollHeight + scrollHeight)))
+                                  (self.boxCornerY + 90 + self.scrollHeight <= mousePos[1] <= (self.boxCornerY + 90 + self.scrollHeight + scrollHeight)))
 
         self.scrollSelected = self.layer.pygame.mouse.get_pressed()[0] and (self.scrollSelected or self.stepBeforeScroll)
         if self.scrollSelected and self.stepBeforeScroll:
@@ -1074,6 +1121,14 @@ class FilePicker(UIElement):
         for event in self.layer.events:
             if event.type == self.layer.pygame.MOUSEWHEEL:
                 self.scrollHeight += (event.y * -1) * (10 / self.scrollExaggeration)
+
+            if event.type == pygame.KEYDOWN:
+                if (event.key == pygame.K_RETURN) and (self.selectedItem is not None):
+                    self.openTrack()
+                if (event.key == pygame.K_RETURN) and (len(self.limitedList) == 1):
+                    self.selectedItem = self.limitedList[0]
+                    self.itemIndexSelected = 0
+                    self.openTrack()
 
         self.scrollHeight = max(0, min(self.scrollHeight, 235 - 235 * self.viewProportion))
 
@@ -1101,11 +1156,23 @@ class FilePicker(UIElement):
             self.deleteTrackButton.disabled = True
             self.renameTrackButton.disabled = True
 
-        if self.selectedItem is not None:
-            for event in self.layer.events:
-                if event.type == pygame.KEYDOWN:
-                    if event.key == pygame.K_RETURN:
-                        self.openTrack()
+    def alwaysUpdate(self):
+        if self.framesTillOpen is not None:
+            waitSurface = self.layer.pygame.Surface((self.layer.screenWidth, self.layer.screenHeight), self.layer.pygame.SRCALPHA)
+            self.layer.pygame.draw.rect(waitSurface, (50, 50, 50, 200), (0, 0, self.layer.screenWidth, self.layer.screenHeight))
+
+            trackName = getTrackName(self.selectedItem)
+            waitMessage = f"Opening {trackName}..."
+            messageSize = self.messageFont.get_rect(waitMessage).size
+            self.messageFont.render_to(waitSurface, ((self.layer.screenWidth / 2) - (messageSize[0] / 2), (self.layer.screenHeight / 2) - (messageSize[1] / 2)), waitMessage, (200, 200, 200, 255))
+
+            self.layer.screen.blit(waitSurface, (0, 0))
+
+            self.framesTillOpen -= 1
+            if self.framesTillOpen <= 0:
+                fileDirectory = os.path.join(self.directory, self.selectedItem)
+                self.openAction(fileDirectory)
+                self.closeWindow()
 
     def display(self):
         transparentSurface = self.layer.pygame.Surface((self.layer.screenWidth, self.layer.screenHeight), self.layer.pygame.SRCALPHA)
@@ -1125,7 +1192,7 @@ class FilePicker(UIElement):
             self.layer.pygame.draw.rect(self.trackListSurface, (60, 60, 60), (20, (30 * self.itemIndexSelected) - (self.scrollHeight * self.scrollExaggeration) + 3, self.width - 90, 30), border_radius = 20)
 
         if self.lastLimitedList != self.limitedList:
-            self.trackListTextSurface = self.layer.pygame.Surface((self.width, max((30 * (len(self.limitedList))) - (self.scrollHeight * self.scrollExaggeration) + 10, 10)), self.layer.pygame.SRCALPHA)
+            self.trackListTextSurface = self.layer.pygame.Surface((self.width, max((30 * (len(self.limitedList))) + 10, 10)), self.layer.pygame.SRCALPHA)
             for itemIndex in range(len(self.limitedList)):
                 trackName = os.path.splitext(self.limitedList[itemIndex])[0]
                 if trackName[:22] != trackName:
@@ -1162,7 +1229,7 @@ class FileSaver(UIElement):
         self.boxCornerY = 0
 
         self.saveButton = Button(layer, (0, 0), "", (self.width - 40, 40), self.actionText, 18, (150, 150, 150), disabled = True, action = self.saveTrack)
-        self.fileNameInput = TextInput(layer, (0, 0), "", (self.width - 40, 50), 18, "Filename", bgColour = (70, 70, 70, 255), characterBlackList = ["\\", "/", ":", "*", "?", '"', "<", ">", "|"])
+        self.fileNameInput = TextInput(layer, (0, 0), "", (self.width - 40, 50), 18, "Track name", bgColour = (70, 70, 70, 255), characterBlackList = ["\\", "/", ":", "*", "?", '"', "<", ">", "|"])
         self.closeButton = Button(layer, (0, 0), "", (30, 30), "", 10, (122, 43, 43), action = self.closeWindow)
         self.closeImage = Image(layer, (0, 0), "", self.layer.directories["cross"], 1, colour = (200, 200, 200))
 

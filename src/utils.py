@@ -8,6 +8,12 @@ def pointDistance(point1, point2):
 
     return math.sqrt(((y2 - y1) ** 2) + ((x1 - x2) ** 2))
 
+#Finds the coords of the nearest point to targetCoord
+def findNearest(coords, targetCoord):
+    nearestPoint = min(coords, key=lambda x: (x[0] - targetCoord[0])**2 + (x[1] - targetCoord[1])**2)
+    nearestIndex = coords.index(nearestPoint)
+    return nearestPoint, nearestIndex
+
 #Calculate the angle between 3 points
 def angle(point1, point2, point3):
     distance12 = pointDistance(point1, point2) #
@@ -128,16 +134,19 @@ def sinDeg(degrees):
 def cosDeg(degrees):
     return math.cos(degrees * math.pi / 180)
 
+#COnverts pixels to miles using a pix -> meters scale
 def pixToMiles(pixels, scale):
     meters = pixels * scale
     return int(meters * 2.237)
 
+#Takes seconds and output pretty version
 def secondToRaceTimer(inputSeconds):
     mins = "{:02}".format(int(inputSeconds // 60))
-    secs =  f"{(inputSeconds % 60):05.2f}"
+    secs =  f"{(inputSeconds % 60):06.3f}"
 
     return f"{mins}:{secs}"
 
+#Calculates the bearing off two points.
 def bearing(pos1, pos2):
     changeX = pos2[0] - pos1[0]
     changeY = pos2[1] - pos1[1]
@@ -145,3 +154,7 @@ def bearing(pos1, pos2):
     bearingAngle = math.atan2(changeX, changeY)
     bearingAngle = math.degrees(bearingAngle)
     return bearingAngle % 360
+
+#Returns track name when in "<track>.track" format
+def getTrackName(fullName):
+    return fullName[:-(len('.track'))]

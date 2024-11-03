@@ -160,4 +160,5 @@ cython_debug/
 .idea/
 temp/
 assets/design/
-Racing Line.lnk
+Spline Racer.lnk
+databases/

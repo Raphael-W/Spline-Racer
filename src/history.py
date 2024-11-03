@@ -20,10 +20,10 @@ class Stack:
     def clear(self):
         self.data.clear()
 
-    def __len__(self):
+    def __len__(self): #Returns length of stack when len() is called
         return len(self.data)
 
-    def __str__(self):
+    def __str__(self): #Output pretty version of stack when str() is called
         outputText = f"{'COMMAND': ^20}|{'PARAMETERS': ^60}|{'ID': ^10}\n"
         for i in range(len(self)):
             outputText += f"{self.data[i].command: ^20}|"
@@ -42,6 +42,7 @@ class History:
         self.saved = True
         self.saveState = self.track.getSaveState()
 
+    #Add a new action to the undo stack. Clear the redo stack
     def addAction(self, command, params, group = False):
         if not group:
             self.currentActionID += 1
@@ -51,6 +52,7 @@ class History:
         self.redoStack.clear()
         self.checkIfSaved()
 
+    #Compare saved state and current state of track to check whether it has been saved
     def checkIfSaved(self):
         if self.track.getSaveState() == self.saveState:
             self.saved = True
