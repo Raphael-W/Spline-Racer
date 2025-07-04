@@ -16,7 +16,7 @@ def findNearest(coords, targetCoord):
 
 #Calculate the angle between 3 points
 def angle(point1, point2, point3):
-    distance12 = pointDistance(point1, point2) #
+    distance12 = pointDistance(point1, point2)
     distance23 = pointDistance(point2, point3)
     distance31 = pointDistance(point3, point1)
 

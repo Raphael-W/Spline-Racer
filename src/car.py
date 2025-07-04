@@ -246,6 +246,7 @@ class Car:
                 angularVelocity = 0
             self.position += self.velocity.rotate(-self.rotation) * deltaTime
             self.rotation += math.degrees(angularVelocity) * deltaTime
+            self.rotation = self.rotation % 360
 
             if (self.timerStart is None) and (self.position != self.startPos):
                 self.timerStart = time.time()

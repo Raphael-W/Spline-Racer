@@ -3,6 +3,7 @@ from track import *
 from car import *
 from updateChecker import *
 from utils import *
+from racingLine import *
 
 import json
 import math
@@ -182,6 +183,8 @@ class TrackEditor (Scene):
 
         self.trackRes = 20
         self.track = Track(self.trackRes, pygame, screen)
+        self.racingLine = RacingLine(self.track, Car(pygame, screen, directories, self.track))
+        #print(self.racingLine.rotationValid([332, 438, 0], [353, 432, 51.5], [373, 425, 51.5]))
 
         self.screenWidth = self.previousScreenWidth = screen.get_size()[0]
         self.screenHeight = self.previousScreenHeight = screen.get_size()[1]
@@ -264,6 +267,8 @@ class TrackEditor (Scene):
 
         self.racingLineSwitch = Switch(self.UILayer, (130, 205), "SE", 0.8, value = False)
         self.racingLineLabel = Label(self.UILayer, 15, (290, 203), "SE", "Racing Line", self.colours["white"])
+
+        self.racingLineButton = Button(self.UILayer, (110, 40), "SE", (100, 30), "Generate", 12, (100, 100, 100), action = lambda: None)
 
         self.antialiasingSwitch = Switch(self.UILayer, (130, 177), "SE", 0.8, value = False)
         self.antialiasingLabel = Label(self.UILayer, 15, (299, 175), "SE", "Antialiasing", self.colours["white"])
@@ -1201,6 +1206,8 @@ class TrackEditor (Scene):
 
         self.trackLayer.display(self.screenWidth, self.screenHeight, self.events, self.offsetPosition, self.zoom)
         self.UILayer.display(self.screenWidth, self.screenHeight, self.events)
+        # if len(self.track.points) > 2:
+        #     print((self.track.splinePoints[10], self.track.splinePoints[11], self.track.splinePoints[12]))
 
 class TrackRacing (Scene):
     def __init__(self, trackEditor):
