@@ -16,20 +16,24 @@ import pygame
 import pygame.gfxdraw
 import pygame.freetype
 
-from tkinter.filedialog import askopenfilename
-import tkinter as tk
-
 import os
+import platform
 import webbrowser
 
 import PIL.Image
 from io import BytesIO
 
-if os.name == "nt":
+if platform.system() == "Windows":
     import ctypes
+    from tkinter.filedialog import askopenfilename
+    import tkinter as tk
 
     appID = 'Raphael-W, Spline-Racer' # Arbitrary string
     ctypes.windll.shell32.SetCurrentProcessExplicitAppUserModelID(appID) #Makes taskbar icon same as window icon (Sets app as "individual app", not linked to python)
+
+elif platform.system() == "Darwin":
+    import Cocoa
+    import objc
 
 pygame.init()
 screen = pygame.display.set_mode((1280, 720), pygame.RESIZABLE, pygame.SCALED, vsync=1)
@@ -553,16 +557,28 @@ class TrackEditor (Scene):
             return error
         def getFileName():
             try:
-                root = tk.Tk()
-                logo = tk.PhotoImage(file = directories["logo"])
-                root.iconphoto(True, logo)
+                if platform.system() == "Windows":
+                    root = tk.Tk()
+                    logo = tk.PhotoImage(file = directories["logo"])
+                    root.iconphoto(True, logo)
 
-                root.withdraw()
-                root.wm_attributes('-topmost', 1)
-                imageExtensions = r"*.png *.jpeg *.jpg *.ppm *.gif *.tiff *.bmp"
-                fileSelected = askopenfilename(title = "Open Image", filetypes = [("Images", imageExtensions)])
-                root.destroy()
-                return fileSelected
+                    root.withdraw()
+                    root.wm_attributes('-topmost', 1)
+                    imageExtensions = r"*.png *.jpeg *.jpg *.ppm *.gif *.tiff *.bmp"
+                    fileSelected = askopenfilename(title = "Open Image", filetypes = [("Images", imageExtensions)])
+                    root.destroy()
+                    return fileSelected
+                elif platform.system() == "Darwin":
+                    panel = Cocoa.NSOpenPanel.openPanel()
+                    panel.setCanChooseFiles_(True)
+                    panel.setCanChooseDirectories_(False)
+                    panel.setAllowsMultipleSelection_(False)
+
+                    if panel.runModal() == Cocoa.NSModalResponseOK:
+                        filePath = panel.URLs()[0].path()
+                        return filePath
+                    else:
+                        return ""
             except:
                 return None
 
