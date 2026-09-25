@@ -1,4 +1,5 @@
 # Spline Racer
+**Overhaul in progress on the [overhaul branch](https://github.com/Raphael-W/Spline-Racer/tree/overhaul)** (implementing own [UI Engine](https://github.com/Raphael-W/pygame-ui), spatial hashing for collision detection, speedups etc.)<br><br>
 A game that allows you to design the track of your dreams, set the fastest lap, and share it with friends.
 
 <img src="assets/img/gamePreview.png">
