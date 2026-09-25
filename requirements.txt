@@ -1,7 +1,0 @@
-pygame
-jsonschema
-pillow
-numpy
-scipy
-tabulate
-requests

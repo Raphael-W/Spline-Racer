@@ -1,17 +1,17 @@
 from scipy.spatial import KDTree
 import time
-from pygame import Vector2
+import pygame
 
-from utils import *
+from core.utils import *
 class Car:
-    def __init__(self, pygame, screen, directories, track):
-        self.pygame = pygame
+    def __init__(self, screen, camera, track):
         self.screen = screen
+        self.camera = camera
 
-        self.position = Vector2(50, 50)
+        self.position = pygame.Vector2(50, 50)
         self.scale = 0.2
 
-        self.velocity = Vector2(0.0, 0.0)
+        self.velocity = pygame.Vector2(0.0, 0.0)
         self.acceleration = 0
         self.steering = 0
         self.rotation = 0
@@ -20,6 +20,7 @@ class Car:
         self.steeringInput = 0
         self.accelerationInput = 0
 
+        # CONSTANTS:
         self.maxSpeed = 515
         self.maxAcceleration = 120
         self.maxTurningAngle = 40
@@ -48,10 +49,6 @@ class Car:
 
         self.modelMultiplier = 1
 
-        self.zoom = 1
-        self.previousZoom = 0
-        self.offset = (0, 0)
-
         self.show = True
         self.offTrack = False
         self.offCourse = False
@@ -59,7 +56,6 @@ class Car:
         self.dead = False
         self.previouslyOffCourse = False
 
-        self.directories = directories
         self.track = track
         self.nearestSplineIndex = None
         self.previousSplineIndex = None
@@ -72,10 +68,10 @@ class Car:
         self.updateNearestSplineIndex()
 
     #Sets position of car
-    def setPosition(self, posX, posY, facing = 0):
-        self.position = Vector2(posX, posY)
+    def setPosition(self, x, y, facing = 0):
+        self.position = pygame.Vector2(x, y)
         self.rotation = facing
-        self.velocity = Vector2(0, 0)
+        self.velocity = pygame.Vector2(0, 0)
         self.acceleration = 0
 
     #Resets position of car
@@ -83,7 +79,7 @@ class Car:
         startPos, startAngle, startIndex, startDir = self.track.getStartPos()
         self.nearestSplineIndex = None
 
-        offsetStartPos = calculateSide(self.track.splinePoints, startIndex, (startOffset * 2) * (1 / self.track.scale))
+        offsetStartPos = calculateSide(self.track.spline, startIndex, (startOffset * 2) * (1 / self.track.scale))
         self.startPos = offsetStartPos
         self.setPosition(*offsetStartPos, startAngle)
 
@@ -93,17 +89,17 @@ class Car:
 
     #Updates where nearest point on track is
     def updateNearestSplineIndex(self):
-        if len(self.track.points) >= 2:
+        if len(self.track.control_points) >= 2:
             previousIndex = self.nearestSplineIndex
-            listLength = len(self.track.splinePoints)
-            trackRes = int(self.track.perSegRes)
+            listLength = len(self.track.spline)
+            trackRes = int(self.track.resolution)
 
             if self.nearestSplineIndex is None:
                 pointsIndex = list(range(listLength))
-                points = self.track.splinePoints
+                points = self.track.spline
             else:
                 pointsIndex = [i % listLength for i in range(previousIndex - trackRes, previousIndex + trackRes)]
-                points = [self.track.splinePoints[i] for i in pointsIndex]
+                points = [self.track.spline[i] for i in pointsIndex]
 
             tree = KDTree(points)
             index = tree.query(self.position)[1]
@@ -113,8 +109,8 @@ class Car:
 
     #Checks whether car is offtrack
     def updateOffTrack(self):
-        if len(self.track.points) >= 2:
-            points = extendPoints(self.track.splinePoints)
+        if len(self.track.control_points) >= 2:
+            points = extendPoints(self.track.spline)
             width = self.track.width * (1 / self.track.scale)
             index = self.nearestSplineIndex + 1
 
@@ -127,10 +123,7 @@ class Car:
             self.offCourse = distanceFromCenter[0] > ((width + 100) / 2)
             self.dead = self.dead or self.offCourse
 
-    def display(self, offset, zoom, bodyColour = (255, 255, 255), appearance = 0, surface = None):
-        self.offset = offset
-        self.zoom = zoom
-
+    def display(self, bodyColour = (255, 255, 255), appearance = 0, surface = None):
         if surface is None:
             surface = self.screen
 
@@ -145,7 +138,7 @@ class Car:
             if self.offCourse:
                 bodyColour = (255, 0, 0)
 
-            #Change colour if the current bodyColour is not what it should be
+            #Change color if the current bodyColour is not what it should be
             if self.bodyColour[appearance] != bodyColour:
                 self.carBody[appearance].fill((255, 255, 255), special_flags = 5)  #BLEND_RGB_MAX
                 self.carWheelR[appearance].fill((255, 255, 255), special_flags = 5)  #BLEND_RGB_MAX
@@ -158,8 +151,8 @@ class Car:
                 self.bodyColour[appearance] = bodyColour
 
             #Rotate wheel to match input
-            self.transformedCarWheelR = self.pygame.transform.rotate(self.carWheelR[appearance], (self.steeringInput * self.maxTurningAngle * 0.5))
-            self.transformedCarWheelL = self.pygame.transform.rotate(self.carWheelL[appearance], (self.steeringInput * self.maxTurningAngle * 0.5))
+            self.transformedCarWheelR = pygame.transform.rotate(self.carWheelR[appearance], (self.steeringInput * self.maxTurningAngle * 0.5))
+            self.transformedCarWheelL = pygame.transform.rotate(self.carWheelL[appearance], (self.steeringInput * self.maxTurningAngle * 0.5))
             self.transformedCarBody = self.carBody[appearance]
 
             self.carWheelRRect = self.transformedCarWheelR.get_rect()
@@ -168,25 +161,25 @@ class Car:
             self.carWheelRRect.center = (436, 281)
             self.carWheelLRect.center = (64, 281)
 
-            self.carSurface = self.pygame.Surface((520, 963), self.pygame.SRCALPHA)
+            self.carSurface = pygame.Surface((520, 963), pygame.SRCALPHA)
             self.carSurface.blit(self.transformedCarBody, self.carBodyRect)
             self.carSurface.blit(self.transformedCarWheelR, self.carWheelRRect)
             self.carSurface.blit(self.transformedCarWheelL, self.carWheelLRect)
 
-            self.carSurface = self.pygame.transform.scale_by(self.carSurface, self.modelMultiplier)
-            self.carSurface = self.pygame.transform.rotate(self.carSurface, self.rotation - 90)
-            surfaceRect = self.carSurface.get_rect(center = offsetPoints(self.position, self.offset, self.zoom, True))
+            self.carSurface = pygame.transform.scale_by(self.carSurface, self.modelMultiplier)
+            self.carSurface = pygame.transform.rotate(self.carSurface, self.rotation - 90)
+            surfaceRect = self.carSurface.get_rect(center = self.camera.world_to_screen(self.position))
 
             surface.blit(self.carSurface, (surfaceRect.x, surfaceRect.y))
 
     def update(self, steeringInput, accelerationInput, deltaTime, pause = False):
-        self.modelMultiplier = self.zoom * (1 / 500) * self.width #0.02 at zoom = 1
+        self.modelMultiplier = self.camera.get_zoom() * (1 / 500) * self.width #0.02 at zoom = 1
 
         #Load in car body if it hasn't already been loaded
         if len(self.carBody) == 0:
-            self.transformedCarBody = self.pygame.image.load(self.directories["f1Car"]).convert_alpha()
-            self.transformedCarWheelR = self.pygame.image.load(self.directories["f1Wheel"]).convert_alpha()
-            self.transformedCarWheelL = self.pygame.image.load(self.directories["f1Wheel"]).convert_alpha()
+            self.transformedCarBody = pygame.image.load(asset_path("sprites", "f1_car.png")).convert_alpha()
+            self.transformedCarWheelR = pygame.image.load(asset_path("sprites", "f1_wheel.png")).convert_alpha()
+            self.transformedCarWheelL = pygame.image.load(asset_path("sprites", "f1_wheel.png")).convert_alpha()
 
             self.carBody.append(self.transformedCarBody)
             self.carWheelR.append(self.transformedCarWheelR)
@@ -255,17 +248,16 @@ class Car:
             if self.track.closed:
                 startPos, startAngle, startIndex, startDir = self.track.getStartPos()
                 if startDir:
-                    self.crossedFinishLine = (self.previousSplineIndex == ((startIndex - 1) % len(self.track.splinePoints))) and (self.nearestSplineIndex == startIndex)
-                    cheated = (self.previousSplineIndex == ((startIndex + 1) % len(self.track.splinePoints))) and (self.nearestSplineIndex == startIndex)
+                    self.crossedFinishLine = (self.previousSplineIndex == ((startIndex - 1) % len(self.track.spline))) and (self.nearestSplineIndex == startIndex)
+                    cheated = (self.previousSplineIndex == ((startIndex + 1) % len(self.track.spline))) and (self.nearestSplineIndex == startIndex)
                 else:
-                    self.crossedFinishLine = (self.previousSplineIndex == ((startIndex + 1) % len(self.track.splinePoints))) and (self.nearestSplineIndex == startIndex)
-                    cheated = (self.previousSplineIndex == ((startIndex - 1) % len(self.track.splinePoints))) and (self.nearestSplineIndex == startIndex)
+                    self.crossedFinishLine = (self.previousSplineIndex == ((startIndex + 1) % len(self.track.spline))) and (self.nearestSplineIndex == startIndex)
+                    cheated = (self.previousSplineIndex == ((startIndex - 1) % len(self.track.spline))) and (self.nearestSplineIndex == startIndex)
             else:
-                self.crossedFinishLine = (self.nearestSplineIndex == len(self.track.splinePoints) - 1)
+                self.crossedFinishLine = (self.nearestSplineIndex == len(self.track.spline) - 1)
                 cheated = False
 
             if cheated:
                 self.dead = True
 
             self.previousSplineIndex = self.nearestSplineIndex
-        self.previousZoom = self.zoom

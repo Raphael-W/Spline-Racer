@@ -3,6 +3,7 @@ import requests
 from datetime import datetime
 from threading import Thread
 from time import localtime
+from config import GITHUB_REPO_URL
 
 #Get the date of when the specified file was last modified
 def getModifiedDate(fileDir):
@@ -14,8 +15,8 @@ def getModifiedDate(fileDir):
         return -1
 
 #Get date of when the last commit was made
-def getDataFromLatestCommit(repoURL):
-    apiURL = repoURL.replace("https://github.com/", "https://api.github.com/repos/")
+def getDataFromLatestCommit():
+    apiURL = GITHUB_REPO_URL.replace("https://github.com/", "https://api.github.com/repos/")
     url = f"{apiURL}/branches/master"
 
     try:
@@ -35,10 +36,10 @@ def getDataFromLatestCommit(repoURL):
         return -1, -1
 
 #Compares modified date and commit date to see if a new update is available
-def isUpdateRequired(fileCheck, repoURL, updateAction):
+def isUpdateRequired(fileCheck, updateAction):
     def mainCheck():
         modifiedDate = getModifiedDate(fileCheck)
-        latestCommitDate, latestCommitSHA = getDataFromLatestCommit(repoURL)
+        latestCommitDate, latestCommitSHA = getDataFromLatestCommit()
 
         if not ((modifiedDate < 0) or (latestCommitDate < 0)) and (modifiedDate < latestCommitDate):
             updateAction(latestCommitSHA)
